@@ -9,6 +9,7 @@
     "dev": "tsc-watch --onSuccess \"node --env-file=.env dist/src/main.js\"",
     "build": "prisma generate && tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/src/main.js",
+    "start:deploy": "npm run db:migrate && npm run db:seed && exec node dist/src/main.js",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "node --env-file-if-exists=.env dist/prisma/seed.js",

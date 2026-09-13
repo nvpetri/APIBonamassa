@@ -34,3 +34,43 @@ jobs:
       - run: npm test
       - run: npm run check
       - run: npm run test:integration
+      - name: Verify deployment startup in Docker
+        timeout-minutes: 5
+        env:
+          NODE_ENV: production
+          DATABASE_URL: postgresql://bonamassa:ci-only-password@localhost:5432/bonamassa_startup_test
+          CORS_ORIGINS: ""
+          SEED_STORE_SLUG: bonamassa-startup
+          SEED_MANAGER_EMAIL: startup@example.test
+          SEED_MANAGER_PASSWORD: ci-only-startup-password
+          SEED_DEMO: "false"
+        run: |
+          docker exec "${{ job.services.postgres.id }}" createdb -U bonamassa bonamassa_startup_test
+          docker build -t bonamassa-startup-test .
+          trap 'docker logs bonamassa-startup-test; docker rm -f bonamassa-startup-test' EXIT
+          docker run -d --name bonamassa-startup-test --network host \
+            -e NODE_ENV -e DATABASE_URL -e CORS_ORIGINS -e PORT=3001 \
+            -e SEED_STORE_SLUG -e SEED_MANAGER_EMAIL -e SEED_MANAGER_PASSWORD -e SEED_DEMO \
+            bonamassa-startup-test npm run start:deploy
+          curl --fail --silent --show-error --retry 30 --retry-all-errors \
+            --retry-delay 1 --retry-max-time 60 --max-time 5 \
+            http://127.0.0.1:3001/v1/health
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          const health = await fetch('http://127.0.0.1:3001/v1/health');
+          assert.equal((await health.json()).status, 'ok');
+          const response = await fetch('http://127.0.0.1:3001/v1/sessions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              storeSlug: process.env.SEED_STORE_SLUG,
+              email: process.env.SEED_MANAGER_EMAIL,
+              password: process.env.SEED_MANAGER_PASSWORD,
+            }),
+          });
+          assert.equal(response.status, 201);
+          const session = await response.json();
+          assert.equal(session.user.role, 'MANAGER');
+          assert.ok(session.accessToken);
+          console.log('Deployment startup: migrations, health check and manager login passed.');
+          NODE
