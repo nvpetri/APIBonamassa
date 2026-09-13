@@ -1,0 +1,231 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  MANAGER
+  ATTENDANT
+  KITCHEN
+  DRIVER
+  CUSTOMER
+}
+
+enum OrderStatus {
+  NEW
+  CONFIRMED
+  PREPARING
+  READY
+  OUT_FOR_DELIVERY
+  RETURNING
+  DELIVERED
+  RETURNED
+  CANCELLED
+}
+
+enum DeliveryStatus {
+  ASSIGNED
+  COLLECTED
+  ON_ROUTE
+  RETURNING
+  DELIVERED
+  RETURNED
+}
+
+enum Category {
+  PIZZA
+  CRUST
+  DRINK
+  COMBO
+}
+
+model Store {
+  id            String @id @default(uuid()) @db.Uuid
+  slug          String @unique @db.VarChar(60)
+  name          String @db.VarChar(100)
+  open          Boolean @default(false)
+  deliveryFee   Int @default(700)
+  driverFee     Int @default(800)
+  version       Int @default(1)
+  nextNumber    Int @default(1000)
+  createdAt     DateTime @default(now())
+  users         User[]
+  products      Product[]
+  promotions    Promotion[]
+  images        ProductImage[]
+  audits        Audit[]
+}
+
+model User {
+  id           String @id @default(uuid()) @db.Uuid
+  storeId      String @db.Uuid
+  store        Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  email        String @db.VarChar(254)
+  name         String @db.VarChar(80)
+  phone        String @db.VarChar(20)
+  passwordHash String
+  role         Role
+  enabled      Boolean @default(true)
+  available    Boolean @default(true)
+  version      Int @default(1)
+  createdAt    DateTime @default(now())
+  sessions     Session[]
+  quotes       Quote[]
+  customerOrders Order[] @relation("CustomerOrders")
+  driverOrders   Order[] @relation("DriverOrders")
+  idempotencies Idempotency[]
+  @@unique([storeId, email])
+  @@unique([storeId, id])
+}
+
+model Session {
+  id        String @id @default(uuid()) @db.Uuid
+  tokenHash String @unique @db.Char(64)
+  userId    String @db.Uuid
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+
+model Product {
+  storeId String @db.Uuid
+  id String @db.VarChar(80)
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  category Category
+  nameKey String @db.VarChar(100)
+  version Int @default(1)
+  data Json
+  imageId String? @db.Uuid
+  image ProductImage? @relation(fields: [storeId, imageId], references: [storeId, id], onDelete: Restrict)
+  @@id([storeId, id])
+  @@unique([storeId, category, nameKey])
+}
+
+model ProductImage {
+  id String @id @default(uuid()) @db.Uuid
+  storeId String @db.Uuid
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  bytes Bytes
+  digest String @db.Char(64)
+  createdAt DateTime @default(now())
+  products Product[]
+  @@unique([storeId, id])
+  @@index([createdAt])
+}
+
+model Promotion {
+  storeId String @db.Uuid
+  id String @db.Uuid
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  version Int @default(1)
+  data Json
+  pizzaLimit Int?
+  reserved Int @default(0)
+  sold Int @default(0)
+  orders Order[]
+  @@id([storeId, id])
+}
+
+model Quote {
+  id String @id @default(uuid()) @db.Uuid
+  storeId String @db.Uuid
+  userId String @db.Uuid
+  user User @relation(fields: [storeId, userId], references: [storeId, id], onDelete: Restrict)
+  draft Json
+  priced Json
+  fingerprint String @db.Char(64)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  order Order?
+  @@unique([storeId, id])
+  @@index([expiresAt])
+}
+
+model Order {
+  id String @id @default(uuid()) @db.Uuid
+  storeId String @db.Uuid
+  number Int
+  quoteId String @unique @db.Uuid
+  quote Quote @relation(fields: [storeId, quoteId], references: [storeId, id], onDelete: Restrict)
+  customerId String? @db.Uuid
+  customerUser User? @relation("CustomerOrders", fields: [storeId, customerId], references: [storeId, id], onDelete: Restrict)
+  driverId String? @db.Uuid
+  driver User? @relation("DriverOrders", fields: [storeId, driverId], references: [storeId, id], onDelete: Restrict)
+  status OrderStatus @default(NEW)
+  deliveryStatus DeliveryStatus?
+  version Int @default(1)
+  mode String @db.VarChar(20)
+  channel String @db.VarChar(20)
+  customer Json
+  address Json?
+  note String @db.VarChar(240)
+  items Json
+  subtotal Int
+  fee Int
+  discount Int
+  total Int
+  payment String @db.VarChar(20)
+  paymentRecorded Boolean @default(false)
+  cashTendered Int?
+  recipient String? @db.VarChar(80)
+  driverFee Int @default(0)
+  promotionId String? @db.Uuid
+  promotion Promotion? @relation(fields: [storeId, promotionId], references: [storeId, id], onDelete: Restrict)
+  promotionSnapshot Json?
+  promotionQuantity Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  events OrderEvent[]
+  @@unique([storeId, number])
+  @@unique([storeId, quoteId])
+  @@index([storeId, createdAt, id])
+  @@index([storeId, status, createdAt, id])
+  @@index([storeId, driverId, createdAt, id])
+  @@index([storeId, customerId, createdAt, id])
+}
+
+model OrderEvent {
+  id String @id @default(uuid()) @db.Uuid
+  orderId String @db.Uuid
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  version Int
+  action String @db.VarChar(40)
+  actorId String @db.Uuid
+  data Json
+  createdAt DateTime @default(now())
+  @@unique([orderId, version])
+}
+
+model Idempotency {
+  storeId String @db.Uuid
+  userId String @db.Uuid
+  user User @relation(fields: [storeId, userId], references: [storeId, id], onDelete: Restrict)
+  key String @db.VarChar(100)
+  fingerprint String @db.Char(64)
+  response Json
+  createdAt DateTime @default(now())
+  @@id([storeId, userId, key])
+}
+
+model RateBucket {
+  key String @id @db.Char(64)
+  count Int
+  resetsAt DateTime
+  @@index([resetsAt])
+}
+
+model Audit {
+  id String @id @default(uuid()) @db.Uuid
+  storeId String @db.Uuid
+  store Store @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  actorId String @db.Uuid
+  action String @db.VarChar(60)
+  data Json
+  createdAt DateTime @default(now())
+  @@index([storeId, createdAt])
+}

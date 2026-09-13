@@ -1,0 +1,50 @@
+{
+  "name": "bonamassa-api",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "dev": "tsc-watch --onSuccess \"node --env-file=.env dist/src/main.js\"",
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/src/main.js",
+    "db:generate": "prisma generate",
+    "db:migrate": "prisma migrate deploy",
+    "db:seed": "node --env-file-if-exists=.env dist/prisma/seed.js",
+    "test": "npm run build && node --test dist/test/domain.test.js",
+    "test:integration": "npm run build && node --env-file-if-exists=.env --test dist/test/integration.test.js",
+    "format": "prettier --write .",
+    "check": "tsc --noEmit && prettier --check .",
+    "maintenance": "node --env-file-if-exists=.env dist/scripts/maintenance.js",
+    "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.3",
+    "@nestjs/core": "11.2.3",
+    "@nestjs/platform-express": "11.2.3",
+    "@nestjs/swagger": "11.4.7",
+    "@prisma/client": "6.19.3",
+    "dotenv": "17.2.3",
+    "helmet": "8.1.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "sharp": "0.35.4",
+    "socket.io": "4.8.1",
+    "zod": "4.6.4"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/multer": "2.0.0",
+    "@types/node": "24.10.1",
+    "prettier": "3.9.6",
+    "prisma": "6.19.3",
+    "socket.io-client": "4.8.1",
+    "tsc-watch": "7.2.0",
+    "typescript": "5.9.3"
+  },
+  "overrides": {
+    "multer": "2.3.0",
+    "deepmerge-ts": "8.0.2"
+  }
+}
