@@ -14,7 +14,23 @@
 | `SEED_DEMO`                                                      | Exemplos apenas quando true; recusado com NODE_ENV=production.  |
 | `TEST_DATABASE_URL`                                              | Banco separado para testes de integração.                       |
 
-O seed é explícito e não roda no startup. Não sobrescreve preços ou credenciais existentes. Para uma nova loja operacional, execute com `SEED_DEMO=false`, depois cadastre dados oficiais usando o gestor. Cadastros públicos são sempre clientes; criação de equipe exige gestor autenticado. Não há recuperação de senha por e-mail nesta etapa.
+O seed é explícito e não roda no startup padrão (`npm start` ou o CMD do Dockerfile). O comando opcional `npm run start:deploy`, descrito abaixo, executa migrations e seed antes de iniciar a API. O seed não sobrescreve preços ou credenciais existentes. Para uma nova loja operacional, execute com `SEED_DEMO=false`, depois cadastre dados oficiais usando o gestor. Cadastros públicos são sempre clientes; criação de equipe exige gestor autenticado. Não há recuperação de senha por e-mail nesta etapa.
+
+## Render com PostgreSQL no Neon
+
+No Render, use um **Web Service** com Language `Docker`, Docker Build Context Directory `.` e Dockerfile Path `./Dockerfile`. Configure o Health Check Path como `/v1/health`. No campo **Docker Command**, use somente:
+
+```sh
+npm run start:deploy
+```
+
+Esse comando usa o shell do npm dentro do contêiner Linux para executar `db:migrate`, `db:seed` e a API, nessa ordem. Se uma etapa falhar, a API não inicia. Não envolva o comando do campo do Render em aspas ou em outra chamada a `/bin/sh -c`. O campo Pre-Deploy Command pode ficar vazio no plano Free.
+
+Defina no Render `NODE_ENV=production`, `DATABASE_URL` com a conexão direta do Neon completa (incluindo os parâmetros SSL), `SEED_STORE_SLUG=bonamassa`, `SEED_MANAGER_EMAIL`, `SEED_MANAGER_PASSWORD` (12 a 128 caracteres) e `SEED_DEMO=false`. Mantenha as credenciais apenas nas variáveis do serviço. A inicialização não transfere o banco local: em um banco vazio cria uma loja fechada e o gestor. Cardápio, equipe e dados existentes exigem cadastro ou transferência à parte.
+
+Defina também `CORS_ORIGINS` explicitamente. Para o painel Next.js que encaminha chamadas pelo servidor e os aplicativos Android nativos, o valor pode ser vazio. Se um frontend no navegador acessar a API diretamente, liste suas origens HTTPS exatas, separadas por vírgula. O Render define `PORT` e a API escuta em `0.0.0.0`.
+
+Depois do deploy, confirme que `/v1/health` retorna `status: "ok"` e que o gestor consegue fazer login. A cada reinício, o comando aplica somente migrations pendentes e preserva os cadastros e senhas existentes no seed. O comando padrão do Dockerfile permanece disponível para infraestruturas que executam migrations e seed separadamente.
 
 ## Banco e concorrência
 
