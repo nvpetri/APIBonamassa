@@ -245,3 +245,29 @@ test("preço único e grupo de pizza são validados por categoria", () => {
     false,
   );
 });
+
+test("desconto não permite subtotal acima do limite nem overflow no banco", () => {
+  const products = demoProducts.map((p) =>
+    p.category === "PIZZA"
+      ? {
+          ...p,
+          prices: { SMALL: 10_000_000, MEDIUM: 10_000_000, LARGE: 10_000_000 },
+        }
+      : p,
+  );
+  assert.throws(
+    () =>
+      price(
+        products,
+        {
+          ...draft,
+          promotionId: promo.id,
+          items: [{ ...pizza, crust: "NONE", quantity: 20 }],
+        },
+        0,
+        { ...promo, value: 100, pizzaLimit: null },
+        now,
+      ),
+    /valor máximo/,
+  );
+});

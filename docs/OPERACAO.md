@@ -28,7 +28,7 @@ As chaves de idempotência ficam persistidas sem expiração nesta versão. A re
 
 - Até 200 produtos, 500 campanhas e 100 funcionários por loja; cadastro público de clientes não usa esse limite de equipe.
 - Até 30 linhas por pedido, 20 unidades por linha, 2 sabores por pizza e 6 componentes por combo.
-- Total máximo por pedido: 10.000.000 centavos. Taxa de entrega e comissão: até 10.000 centavos cada.
+- Subtotal dos produtos e total máximo por pedido: 10.000.000 centavos cada. Desconto não amplia esse limite. Taxa de entrega e comissão: até 10.000 centavos cada.
 - Corpo JSON até 256 KB. Foto até 5 MB/16 MP na entrada, WebP até 1 MB ao armazenar. Até 100 MB de fotos por loja.
 - Limitação persistida de requisições por IP; login também limitado por conta/loja. Headers X-Forwarded-For não são confiados por padrão.
 - Sem geocodificação ou validação da região de entrega. Abrir loja é um comando explícito, sem agenda automática.

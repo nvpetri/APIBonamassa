@@ -364,7 +364,7 @@ export function price(
   const subtotal = items.reduce((sum, i) => sum + i.quantity * i.unitPrice, 0);
   const total = subtotal + fee - (discount?.amount ?? 0);
   ensure(
-    total <= 10_000_000,
+    subtotal <= 10_000_000 && total <= 10_000_000,
     "ORDER_TOO_LARGE",
     "O pedido excede o valor máximo permitido.",
   );
