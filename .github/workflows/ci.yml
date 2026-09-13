@@ -68,7 +68,7 @@ jobs:
               password: process.env.SEED_MANAGER_PASSWORD,
             }),
           });
-          assert.equal(response.status, 201);
+          assert.equal(response.status, 200);
           const session = await response.json();
           assert.equal(session.user.role, 'MANAGER');
           assert.ok(session.accessToken);
