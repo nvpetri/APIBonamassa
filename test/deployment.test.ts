@@ -24,6 +24,8 @@ test("produção exige TLS validado, sem demo ou documentação pública", () =>
         "postgresql://user:password@host/app?sslmode=require&sslaccept=accept_invalid_certs",
     },
     { DATABASE_URL: "https://host/app?sslmode=require&sslaccept=strict" },
+    { DATABASE_URL: production.DATABASE_URL + "&sslmode=disable" },
+    { DATABASE_URL: production.DATABASE_URL + "&sslaccept=accept_invalid_certs" },
     { DOCS_ENABLED: "true" },
     { SEED_DEMO: "true" },
     { CORS_ORIGINS: "*" },

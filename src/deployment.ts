@@ -38,6 +38,8 @@ export function deployment(env: NodeJS.ProcessEnv = process.env) {
     if (
       !["postgres:", "postgresql:"].includes(database.protocol) ||
       !database.hostname ||
+      database.searchParams.getAll("sslmode").length !== 1 ||
+      database.searchParams.getAll("sslaccept").length !== 1 ||
       database.searchParams.get("sslmode") !== "require" ||
       database.searchParams.get("sslaccept") !== "strict"
     )

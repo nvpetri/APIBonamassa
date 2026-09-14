@@ -7,11 +7,7 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { Role, User } from "@prisma/client";
-import {
-  randomBytes,
-  scrypt as nodeScrypt,
-  timingSafeEqual,
-} from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { Request } from "express";
 import { z } from "zod";
 import { Db, Tx, json, tokenHash } from "./db";
@@ -20,31 +16,9 @@ import { ensure, loginSchema, registerSchema, RuleError } from "./domain";
 import { ChangeBus } from "./realtime";
 import { RateLimitError, retryAfterSeconds } from "./rate-limit";
 
-const derive = (password: string, salt: string): Promise<Buffer> =>
-  new Promise((resolve, reject) =>
-    nodeScrypt(
-      password,
-      salt,
-      64,
-      { N: 32768, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
-      (err, key) => (err ? reject(err) : resolve(key)),
-    ),
-  );
-export async function hashPassword(password: string) {
-  const salt = randomBytes(16).toString("hex");
-  return `scrypt$${salt}$${(await derive(password, salt)).toString("hex")}`;
-}
-async function verify(password: string, hash: string) {
-  const [algorithm, salt, expected] = hash.split("$");
-  if (algorithm !== "scrypt" || !salt || !/^[0-9a-f]{128}$/.test(expected))
-    return false;
-  return timingSafeEqual(
-    await derive(password, salt),
-    Buffer.from(expected, "hex"),
-  );
-}
-// Fixed dummy hash gives missing accounts the same expensive password check.
-const dummyHash = `scrypt$00000000000000000000000000000000$${"0".repeat(128)}`;
+import { dummyPasswordHash, hashPassword, needsPasswordUpgrade, verifyPassword } from "./password";
+export { hashPassword } from "./password";
+
 export type Actor = Pick<
   User,
   "id" | "storeId" | "role" | "name" | "phone" | "email"
@@ -83,10 +57,10 @@ export class AuthService {
     if (rows[0].count > limit)
       throw new RateLimitError(retryAfterSeconds(rows[0].resetsAt));
   }
-  async issue(user: User) {
+  async issue(user: User, tx: Tx = this.db) {
     const accessToken = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + config().SESSION_HOURS * 3600_000);
-    await this.db.session.create({
+    await tx.session.create({
       data: { userId: user.id, tokenHash: tokenHash(accessToken), expiresAt },
     });
     return { accessToken, tokenType: "Bearer", expiresAt, user: userDto(user) };
@@ -101,14 +75,25 @@ export class AuthService {
       (await this.db.user.findUnique({
         where: { storeId_email: { storeId: store.id, email: input.email } },
       }));
-    const valid = await verify(input.password, user?.passwordHash ?? dummyHash);
+    const valid = await verifyPassword(input.password, user?.passwordHash ?? dummyPasswordHash);
     ensure(
       user?.enabled && valid,
       "INVALID_CREDENTIALS",
       "E-mail ou senha inválidos.",
       401,
     );
-    return this.issue(user);
+    const upgradedHash = needsPasswordUpgrade(user.passwordHash) ? await hashPassword(input.password) : null;
+    return this.db.write(user.storeId, async (tx) => {
+      const current = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
+      ensure(current.enabled && current.passwordHash === user.passwordHash,
+        "INVALID_CREDENTIALS", "E-mail ou senha inválidos.", 401);
+      if (upgradedHash) {
+        await tx.user.update({ where: { id: current.id }, data: { passwordHash: upgradedHash } });
+        await tx.audit.create({ data: { storeId: current.storeId, actorId: current.id,
+          action: "user.password.rehashed", data: json({ userId: current.id }) } });
+      }
+      return this.issue(current, tx);
+    });
   }
   async register(input: z.infer<typeof registerSchema>) {
     ensure(
@@ -198,7 +183,7 @@ export class AuthService {
       where: { id: actor.id },
     });
     ensure(
-      await verify(current, user.passwordHash),
+      await verifyPassword(current, user.passwordHash),
       "INVALID_CREDENTIALS",
       "Senha atual incorreta.",
       401,
