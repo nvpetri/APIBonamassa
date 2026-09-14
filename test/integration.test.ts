@@ -1289,7 +1289,7 @@ test(
               (e, k) => (e ? reject(e) : resolve(k)),
             ),
           );
-          const legacy = `scrypt${salt}${key.toString("hex")}`;
+          const legacy = ["scrypt", salt, key.toString("hex")].join("$");
           const account = await db.user.create({
             data: {
               storeId: main.store.id,
