@@ -438,8 +438,14 @@ test(
             where: { id: main.store.id },
             data: { opensAt: clock(60), closesAt: clock(180) },
           });
-          assert.equal((await ok("staff/catalog", "manager")).store.open, false);
-          assert.equal((await ok(`orders/${reserved.id}`, "customer")).status, "NEW");
+          assert.equal(
+            (await ok("staff/catalog", "manager")).store.open,
+            false,
+          );
+          assert.equal(
+            (await ok(`orders/${reserved.id}`, "customer")).status,
+            "NEW",
+          );
           await cmd(released, "cancel", "customer", { reason: "Fim do teste" });
           const last = (await ok("staff/catalog", "manager")).store;
           await ok("staff/store", "manager", "PATCH", {
