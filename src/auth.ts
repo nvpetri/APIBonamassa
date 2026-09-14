@@ -111,7 +111,12 @@ export class AuthService {
     return this.issue(user);
   }
   async register(input: z.infer<typeof registerSchema>) {
-    ensure(config().CUSTOMER_REGISTRATION_ENABLED === "true", "REGISTRATION_DISABLED", "Novos cadastros estão temporariamente indisponíveis. Entre com sua conta ou fale com a pizzaria.", 503);
+    ensure(
+      config().CUSTOMER_REGISTRATION_ENABLED === "true",
+      "REGISTRATION_DISABLED",
+      "Novos cadastros estão temporariamente indisponíveis. Entre com sua conta ou fale com a pizzaria.",
+      503,
+    );
     const store = await this.db.store.findUnique({
       where: { slug: input.storeSlug },
     });
@@ -251,7 +256,11 @@ export class AccessGuard implements CanActivate {
     await this.auth.rate(`http:edge:${req.ip}`, 6000, 60);
     if (isPublic) {
       const sensitive = /^\/v1\/(sessions|customers)$/.test(req.path);
-      await this.auth.rate(`http:${sensitive ? "auth" : "anonymous"}:${req.ip}`, sensitive ? 60 : 600, 60);
+      await this.auth.rate(
+        `http:${sensitive ? "auth" : "anonymous"}:${req.ip}`,
+        sensitive ? 60 : 600,
+        60,
+      );
       return true;
     }
     const header = req.headers.authorization;
@@ -264,7 +273,11 @@ export class AccessGuard implements CanActivate {
     req.actor = await this.auth.authenticate(header.slice(7));
     // Separate authenticated staff/customers even behind the same BFF/NAT.
     // Using user identity instead of token prevents bypass by creating sessions.
-    await this.auth.rate(`http:user:${req.actor.storeId}:${req.actor.id}`, 600, 60);
+    await this.auth.rate(
+      `http:user:${req.actor.storeId}:${req.actor.id}`,
+      600,
+      60,
+    );
     const roles = this.reflector.getAllAndOverride<Role[]>("roles", [
       ctx.getHandler(),
       ctx.getClass(),

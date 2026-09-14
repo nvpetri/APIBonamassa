@@ -7,7 +7,8 @@ import { RateLimitError, retryAfterSeconds } from "../src/rate-limit";
 
 const production = {
   NODE_ENV: "production",
-  DATABASE_URL: "postgresql://user:password@database.example.com/app?sslmode=require&sslaccept=strict",
+  DATABASE_URL:
+    "postgresql://user:password@database.example.com/app?sslmode=require&sslaccept=strict",
   CORS_ORIGINS: "",
   DOCS_ENABLED: "false",
   SEED_DEMO: "false",
@@ -18,7 +19,10 @@ test("produção exige TLS validado, sem demo ou documentação pública", () =>
   assert.equal(config({ ...production, APP_ENV: "staging" }).strict, true);
   for (const patch of [
     { DATABASE_URL: "postgresql://user:password@localhost/app" },
-    { DATABASE_URL: "postgresql://user:password@host/app?sslmode=require&sslaccept=accept_invalid_certs" },
+    {
+      DATABASE_URL:
+        "postgresql://user:password@host/app?sslmode=require&sslaccept=accept_invalid_certs",
+    },
     { DATABASE_URL: "https://host/app?sslmode=require&sslaccept=strict" },
     { DOCS_ENABLED: "true" },
     { SEED_DEMO: "true" },
@@ -26,16 +30,36 @@ test("produção exige TLS validado, sem demo ou documentação pública", () =>
     { CORS_ORIGINS: "http://painel.example.com" },
     { APP_ENV: "staging", NODE_ENV: "development" },
     { APP_ENV: "unknown" },
-  ]) assert.throws(() => config({ ...production, ...patch }));
+  ])
+    assert.throws(() => config({ ...production, ...patch }));
 });
 
 test("ambiente isolado pode usar banco local sem enfraquecer produção", () => {
-  assert.equal(config({ NODE_ENV: "test", DATABASE_URL: "postgresql://user:pass@localhost/app_test" }).strict, false);
+  assert.equal(
+    config({
+      NODE_ENV: "test",
+      DATABASE_URL: "postgresql://user:pass@localhost/app_test",
+    }).strict,
+    false,
+  );
 });
 
 test("confiança de proxy exige endereços explícitos e recusa curingas", () => {
-  assert.deepEqual(deployment({ TRUSTED_PROXY_CIDRS: "127.0.0.1/32,::1/128" }).trustedProxies, ["127.0.0.1/32", "::1/128"]);
-  for (const cidrs of ["true", "1", "loopback", "0.0.0.0/0", "::/0", "127.0.0.1/33", "::1/129", "127.0.0.1/-1", "127.0.0.1/1/2"])
+  assert.deepEqual(
+    deployment({ TRUSTED_PROXY_CIDRS: "127.0.0.1/32,::1/128" }).trustedProxies,
+    ["127.0.0.1/32", "::1/128"],
+  );
+  for (const cidrs of [
+    "true",
+    "1",
+    "loopback",
+    "0.0.0.0/0",
+    "::/0",
+    "127.0.0.1/33",
+    "::1/129",
+    "127.0.0.1/-1",
+    "127.0.0.1/1/2",
+  ])
     assert.throws(() => deployment({ TRUSTED_PROXY_CIDRS: cidrs }));
 });
 
@@ -49,12 +73,23 @@ test("XFF forjado é ignorado sem proxy confiável; cadeia anda da direita para 
   const url = `http://127.0.0.1:${address.port}/`;
   try {
     const headers = { "X-Forwarded-For": "198.51.100.99, 203.0.113.22" };
-    assert.equal((await (await fetch(url, { headers })).json()).ip, "127.0.0.1");
-    app.set("trust proxy", deployment({ TRUSTED_PROXY_CIDRS: "127.0.0.1/32" }).trustedProxies);
-    assert.equal((await (await fetch(url, { headers })).json()).ip, "203.0.113.22");
+    assert.equal(
+      (await (await fetch(url, { headers })).json()).ip,
+      "127.0.0.1",
+    );
+    app.set(
+      "trust proxy",
+      deployment({ TRUSTED_PROXY_CIDRS: "127.0.0.1/32" }).trustedProxies,
+    );
+    assert.equal(
+      (await (await fetch(url, { headers })).json()).ip,
+      "203.0.113.22",
+    );
   } finally {
     server.closeAllConnections();
-    await new Promise<void>((resolve, reject) => server.close((e) => e ? reject(e) : resolve()));
+    await new Promise<void>((resolve, reject) =>
+      server.close((e) => (e ? reject(e) : resolve())),
+    );
   }
 });
 

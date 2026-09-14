@@ -108,7 +108,11 @@ export class Errors implements ExceptionFilter {
         code,
         errorType: error instanceof Error ? error.name : "Unknown",
       });
-    if (status === 429) res.setHeader("Retry-After", String(error instanceof RateLimitError ? error.retryAfterSeconds : 60));
+    if (status === 429)
+      res.setHeader(
+        "Retry-After",
+        String(error instanceof RateLimitError ? error.retryAfterSeconds : 60),
+      );
     res.status(status).json({
       code,
       message,

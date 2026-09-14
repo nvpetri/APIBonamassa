@@ -1209,46 +1209,72 @@ test(
         },
       );
 
-      await t.test("limites autenticados separam usuários e Retry-After reflete a janela", async () => {
-        const rateKey = tokenHash(`http:user:${main.store.id}:${ids.manager}`);
-        await db.rateBucket.upsert({
-          where: { key: rateKey },
-          create: { key: rateKey, count: 600, resetsAt: new Date(Date.now() + 55_000) },
-          update: { count: 600, resetsAt: new Date(Date.now() + 55_000) },
-        });
-        try {
-          const limited = await api("me", "manager");
-          assert.equal(limited.status, 429);
-          assert.ok(Number(limited.headers.get("retry-after")) > 0);
-          assert.ok(Number(limited.headers.get("retry-after")) <= 55);
-          assert.equal((await api("me", "customer")).status, 200);
-        } finally {
-          await db.rateBucket.delete({ where: { key: rateKey } });
-        }
-        const key = `test-rate:${slug}`;
-        try {
-          const auth = app.get(AuthService);
-          await auth.rate(key, 1, 60);
-          await assert.rejects(() => auth.rate(key, 1, 60), (e: unknown) => e instanceof RateLimitError && e.retryAfterSeconds > 0 && e.retryAfterSeconds <= 60);
-        } finally {
-          await db.rateBucket.delete({ where: { key: tokenHash(key) } });
-        }
-      });
-      await t.test("cadastro público pode ser suspenso sem revogar quem já usa a loja", async () => {
-        process.env.CUSTOMER_REGISTRATION_ENABLED = "false";
-        try {
-          const r = await api("customers", undefined, "POST", {
-            storeSlug: slug, email: "blocked@example.com", password,
-            name: "Cliente bloqueado", phone: "5511999999999",
+      await t.test(
+        "limites autenticados separam usuários e Retry-After reflete a janela",
+        async () => {
+          const rateKey = tokenHash(
+            `http:user:${main.store.id}:${ids.manager}`,
+          );
+          await db.rateBucket.upsert({
+            where: { key: rateKey },
+            create: {
+              key: rateKey,
+              count: 600,
+              resetsAt: new Date(Date.now() + 55_000),
+            },
+            update: { count: 600, resetsAt: new Date(Date.now() + 55_000) },
           });
-          assert.equal(r.status, 503);
-          assert.equal(r.data.code, "REGISTRATION_DISABLED");
-          assert.equal((await api("me", "customer")).status, 200);
-          assert.equal(await db.user.count({ where: { storeId: main.store.id, email: "blocked@example.com" } }), 0);
-        } finally {
-          process.env.CUSTOMER_REGISTRATION_ENABLED = "true";
-        }
-      });
+          try {
+            const limited = await api("me", "manager");
+            assert.equal(limited.status, 429);
+            assert.ok(Number(limited.headers.get("retry-after")) > 0);
+            assert.ok(Number(limited.headers.get("retry-after")) <= 55);
+            assert.equal((await api("me", "customer")).status, 200);
+          } finally {
+            await db.rateBucket.delete({ where: { key: rateKey } });
+          }
+          const key = `test-rate:${slug}`;
+          try {
+            const auth = app.get(AuthService);
+            await auth.rate(key, 1, 60);
+            await assert.rejects(
+              () => auth.rate(key, 1, 60),
+              (e: unknown) =>
+                e instanceof RateLimitError &&
+                e.retryAfterSeconds > 0 &&
+                e.retryAfterSeconds <= 60,
+            );
+          } finally {
+            await db.rateBucket.delete({ where: { key: tokenHash(key) } });
+          }
+        },
+      );
+      await t.test(
+        "cadastro público pode ser suspenso sem revogar quem já usa a loja",
+        async () => {
+          process.env.CUSTOMER_REGISTRATION_ENABLED = "false";
+          try {
+            const r = await api("customers", undefined, "POST", {
+              storeSlug: slug,
+              email: "blocked@example.com",
+              password,
+              name: "Cliente bloqueado",
+              phone: "5511999999999",
+            });
+            assert.equal(r.status, 503);
+            assert.equal(r.data.code, "REGISTRATION_DISABLED");
+            assert.equal((await api("me", "customer")).status, 200);
+            assert.equal(
+              await db.user.count({
+                where: { storeId: main.store.id, email: "blocked@example.com" },
+              }),
+              0,
+            );
+          } finally {
+            process.env.CUSTOMER_REGISTRATION_ENABLED = "true";
+          }
+        },
+      );
       await t.test(
         "limitação de login é persistida e erro não revela existência da conta",
         async () => {
