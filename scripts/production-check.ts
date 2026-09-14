@@ -5,7 +5,9 @@ try {
   const result = config();
   if (!result.strict || result.NODE_ENV !== "production")
     throw new Error("Use APP_ENV=production ou staging e NODE_ENV=production.");
-  console.log("Configuração de produção: TLS do banco, CORS e flags validados.");
+  console.log(
+    "Configuração de produção: TLS do banco, CORS e flags validados.",
+  );
   if (!result.trustedProxies.length)
     console.warn(
       "PENDENTE: proxies não configurados. Limites anônimos podem ser compartilhados; valide a topologia em homologação.",
