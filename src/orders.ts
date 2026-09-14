@@ -12,6 +12,7 @@ import {
   ensure,
   listSchema,
   price,
+  startRouteSchema,
 } from "./domain";
 import { Change } from "./realtime";
 import { Writes, checkVersion } from "./writes";
@@ -393,6 +394,100 @@ export class OrdersService {
       events.push({ type: "promotion.usage.changed", storeId: order.storeId });
     return events;
   }
+  async startRoute(
+    actor: Actor,
+    key: string,
+    route: z.infer<typeof startRouteSchema>,
+  ) {
+    ensure(
+      actor.role === "DRIVER",
+      "FORBIDDEN",
+      "Use uma conta de entregador.",
+      403,
+    );
+    return this.writes.run(
+      actor,
+      key,
+      "driver:route:start",
+      route,
+      async (tx) => {
+        const orders = await tx.order.findMany({
+          where: {
+            ...scoped(actor),
+            id: { in: route.deliveries.map((d) => d.id) },
+          },
+        });
+        // Validate every assignment/version before changing any order. Writes holds the store lock.
+        ensure(
+          orders.length === route.deliveries.length,
+          "NOT_FOUND",
+          "Uma entrega não está mais atribuída a você. Atualize a lista.",
+          404,
+        );
+        const byId = new Map(orders.map((o) => [o.id, o]));
+        for (const selected of route.deliveries) {
+          const order = byId.get(selected.id)!;
+          checkVersion(order.version, selected.expectedVersion);
+          ensure(
+            order.mode === "DELIVERY" &&
+              order.status === "READY" &&
+              (order.deliveryStatus === "ASSIGNED" ||
+                order.deliveryStatus === "COLLECTED"),
+            "INVALID_TRANSITION",
+            "Uma entrega mudou de etapa. Atualize e confira a rota novamente.",
+            409,
+          );
+        }
+        if (orders.some((o) => o.deliveryStatus === "ASSIGNED")) {
+          const driver = await tx.user.findUniqueOrThrow({
+            where: { id: actor.id },
+          });
+          ensure(
+            driver.available,
+            "DRIVER_UNAVAILABLE",
+            "Ative sua disponibilidade antes de retirar novos pedidos.",
+            409,
+          );
+        }
+        const updated: Loaded[] = [];
+        for (const selected of route.deliveries) {
+          const order = byId.get(selected.id)!;
+          const collecting = order.deliveryStatus === "ASSIGNED";
+          const version = order.version + (collecting ? 2 : 1);
+          const event = (action: string, v: number) => ({
+            action,
+            version: v,
+            actorId: actor.id,
+            data: json({ batch: true }),
+          });
+          updated.push(
+            await tx.order.update({
+              where: { id: order.id },
+              data: {
+                status: "OUT_FOR_DELIVERY",
+                deliveryStatus: "ON_ROUTE",
+                version,
+                events: {
+                  create: [
+                    ...(collecting ? [event("collect", version - 1)] : []),
+                    event("start", version),
+                  ],
+                },
+              },
+              include,
+            }),
+          );
+        }
+        return {
+          data: { items: updated.map((o) => orderDto(o, actor)) },
+          events: updated.flatMap((o) =>
+            this.changes(o, "order.updated", o.driverId),
+          ),
+        };
+      },
+    );
+  }
+
   async command(
     actor: Actor,
     key: string,

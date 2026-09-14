@@ -30,6 +30,7 @@ jobs:
           node-version: "24"
           cache: npm
       - run: npm ci
+      - run: npm run audit:production
       - run: npm run db:migrate
       - run: npm test
       - run: npm run check
@@ -43,6 +44,7 @@ jobs:
         timeout-minutes: 5
         env:
           NODE_ENV: production
+          APP_ENV: test
           DATABASE_URL: postgresql://bonamassa:ci-only-password@localhost:5432/bonamassa_startup_test
           CORS_ORIGINS: ""
           SEED_STORE_SLUG: bonamassa-startup
@@ -54,7 +56,7 @@ jobs:
           docker build -t bonamassa-startup-test .
           trap 'docker logs bonamassa-startup-test; docker rm -f bonamassa-startup-test' EXIT
           docker run -d --name bonamassa-startup-test --network host \
-            -e NODE_ENV -e DATABASE_URL -e CORS_ORIGINS -e PORT=3001 \
+            -e NODE_ENV -e APP_ENV -e DATABASE_URL -e CORS_ORIGINS -e PORT=3001 \
             -e SEED_STORE_SLUG -e SEED_MANAGER_EMAIL -e SEED_MANAGER_PASSWORD -e SEED_DEMO \
             bonamassa-startup-test npm run start:deploy
           curl --fail --silent --show-error --retry 30 --retry-all-errors \

@@ -13,12 +13,15 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "node --env-file-if-exists=.env dist/prisma/seed.js",
-    "test": "npm run build && node --test dist/test/domain.test.js dist/test/schedule.test.js",
+    "test": "npm run build && node --test dist/test/domain.test.js dist/test/schedule.test.js dist/test/deployment.test.js dist/test/password.test.js",
     "test:integration": "npm run build && node --env-file-if-exists=.env --test dist/test/integration.test.js",
     "format": "prettier --write .",
     "check": "tsc --noEmit && prettier --check .",
     "maintenance": "node --env-file-if-exists=.env dist/scripts/maintenance.js",
-    "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs"
+    "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs",
+    "production:check": "node --env-file-if-exists=.env dist/scripts/production-check.js",
+    "start:production": "npm run production:check && exec node dist/src/main.js",
+    "audit:production": "npm audit --omit=dev --audit-level=high"
   },
   "dependencies": {
     "@nestjs/common": "11.2.3",

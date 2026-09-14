@@ -1,11 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
+import { randomUUID, scrypt } from "node:crypto";
 import { PrismaClient, Role } from "@prisma/client";
 import { io, Socket } from "socket.io-client";
 import sharp from "sharp";
 import { createApp } from "../src/app";
-import { hashPassword } from "../src/auth";
+import { AuthService, hashPassword } from "../src/auth";
+import { tokenHash } from "../src/db";
+import { RateLimitError } from "../src/rate-limit";
 import { seedStore } from "../prisma/seed";
 
 function socketEvent(socket: Socket, event: string) {
@@ -41,6 +43,8 @@ test(
     );
     process.env.DATABASE_URL = process.env.TEST_DATABASE_URL;
     process.env.NODE_ENV = "test";
+    process.env.APP_ENV = "test";
+    process.env.CUSTOMER_REGISTRATION_ENABLED = "true";
     process.env.DOCS_ENABLED = "true";
     process.env.CORS_ORIGINS = "http://localhost:3000";
     const db = new PrismaClient();
@@ -220,6 +224,246 @@ test(
       }
       await login("manager", slug, "manager@example.com");
       await login("other", other.store.slug, "manager@example.com");
+
+      await t.test(
+        "sacola com vários produtos cobra um frete e preserva complemento",
+        async () => {
+          for (const number of ["", "   "]) {
+            assert.equal(
+              (
+                await api("orders/quote", "customer", "POST", {
+                  ...draft,
+                  address: { ...draft.address, number },
+                })
+              ).status,
+              400,
+            );
+          }
+          assert.equal(
+            (
+              await api("orders/quote", "customer", "POST", {
+                ...draft,
+                address: {
+                  ...draft.address,
+                  complement: "Apto 12",
+                  noComplement: true,
+                },
+              })
+            ).status,
+            400,
+          );
+          const before = await db.order.count({
+            where: { customerId: ids.customer },
+          });
+          const q = await ok("orders/quote", "customer", "POST", {
+            ...draft,
+            cashTendered: null,
+            items: [
+              draft.items[0],
+              { kind: "DRINK", productId: "refrigerante-2l", quantity: 1 },
+            ],
+            address: {
+              ...draft.address,
+              complement: "Bloco A, apto 12",
+              noComplement: false,
+            },
+          });
+          assert.equal(
+            await db.order.count({ where: { customerId: ids.customer } }),
+            before,
+          );
+          const key = randomUUID();
+          const [created, repeated] = await Promise.all([
+            ok("orders", "customer", "POST", { quoteId: q.quoteId }, key),
+            ok("orders", "customer", "POST", { quoteId: q.quoteId }, key),
+          ]);
+          assert.equal(created.id, repeated.id);
+          assert.equal(
+            await db.order.count({ where: { customerId: ids.customer } }),
+            before + 1,
+          );
+          assert.equal(created.items.length, 2);
+          assert.equal(created.fee, main.store.deliveryFee);
+          assert.equal(
+            created.total,
+            created.subtotal + created.fee - created.discount,
+          );
+          assert.equal(created.address.complement, "Bloco A, apto 12");
+          assert.equal(
+            (await ok(`staff/orders/${created.id}`, "manager")).address
+              .complement,
+            "Bloco A, apto 12",
+          );
+          await cmd(created, "cancel", "customer", {
+            reason: "Fim do teste da sacola",
+          });
+          const absent = await order("customer", {
+            address: { ...draft.address, complement: "", noComplement: true },
+          });
+          assert.equal(absent.address.noComplement, true);
+          await cmd(absent, "cancel", "customer", {
+            reason: "Fim do teste sem complemento",
+          });
+        },
+      );
+
+      await t.test(
+        "rota conjunta é atômica, privada, versionada e idempotente",
+        async () => {
+          let me = await ok("me", "driver");
+          if (!me.available)
+            await ok("driver/availability", "driver", "PATCH", {
+              expectedVersion: me.version,
+              available: true,
+            });
+          const manual = {
+            customer: { name: "Rota teste", phone: "11999999999" },
+            channel: "WHATSAPP",
+          };
+          let a = await assigned(await order("manager", manual));
+          let b = await assigned(
+            await order("manager", {
+              ...manual,
+              address: {
+                ...draft.address,
+                complement: "Apto 2",
+                noComplement: false,
+              },
+            }),
+          );
+          const payload = () => ({
+            confirmCollected: true,
+            deliveries: [a, b].map((o) => ({
+              id: o.id,
+              expectedVersion: o.version,
+            })),
+          });
+          for (const who of [undefined, "customer", "manager", "other"]) {
+            assert.equal(
+              (await api("driver/routes/start", who, "POST", payload())).status,
+              who ? 403 : 401,
+            );
+          }
+          assert.equal(
+            (await api("driver/routes/start", "driver2", "POST", payload()))
+              .status,
+            404,
+          );
+          assert.equal(
+            (
+              await api("driver/routes/start", "driver", "POST", {
+                ...payload(),
+                confirmCollected: false,
+              })
+            ).status,
+            400,
+          );
+          assert.equal(
+            (
+              await api("driver/routes/start", "driver", "POST", {
+                ...payload(),
+                deliveries: [payload().deliveries[0], payload().deliveries[0]],
+              })
+            ).status,
+            400,
+          );
+          assert.equal(
+            (
+              await api("driver/routes/start", "driver", "POST", {
+                ...payload(),
+                deliveries: [],
+              })
+            ).status,
+            400,
+          );
+          const stale = payload();
+          stale.deliveries[1].expectedVersion++;
+          assert.equal(
+            (await api("driver/routes/start", "driver", "POST", stale)).status,
+            409,
+          );
+          assert.equal(
+            (await ok(`driver/deliveries/${a.id}`, "driver")).deliveryStatus,
+            "ASSIGNED",
+          );
+          const foreignQuote = await ok("orders/quote", "other", "POST", {
+            ...draft,
+            ...manual,
+          });
+          const foreign = await ok("staff/orders", "other", "POST", {
+            quoteId: foreignQuote.quoteId,
+          });
+          assert.equal(
+            (
+              await api("driver/routes/start", "driver", "POST", {
+                ...payload(),
+                deliveries: [
+                  payload().deliveries[0],
+                  { id: foreign.id, expectedVersion: foreign.version },
+                ],
+              })
+            ).status,
+            404,
+          );
+          me = await ok("me", "driver");
+          await ok("driver/availability", "driver", "PATCH", {
+            expectedVersion: me.version,
+            available: false,
+          });
+          assert.equal(
+            (await api("driver/routes/start", "driver", "POST", payload())).data
+              .code,
+            "DRIVER_UNAVAILABLE",
+          );
+          assert.equal(
+            (await ok(`driver/deliveries/${b.id}`, "driver")).deliveryStatus,
+            "ASSIGNED",
+          );
+          me = await ok("me", "driver");
+          await ok("driver/availability", "driver", "PATCH", {
+            expectedVersion: me.version,
+            available: true,
+          });
+          b = await cmd(b, "collect", "driver");
+          const body = payload(),
+            key = randomUUID();
+          const [first, retry] = await Promise.all([
+            ok("driver/routes/start", "driver", "POST", body, key),
+            ok("driver/routes/start", "driver", "POST", body, key),
+          ]);
+          assert.deepEqual(first, retry);
+          assert.equal(first.items.length, 2);
+          for (const item of first.items) {
+            assert.equal(item.status, "OUT_FOR_DELIVERY");
+            assert.equal(item.deliveryStatus, "ON_ROUTE");
+            assert.equal(
+              item.events.filter((e: any) => e.action === "collect").length,
+              1,
+            );
+            assert.equal(
+              item.events.filter((e: any) => e.action === "start").length,
+              1,
+            );
+          }
+          assert.equal(
+            (await api("driver/routes/start", "driver", "POST", body)).status,
+            409,
+          );
+          const completed = await cmd(first.items[0], "complete", "driver", {
+            recipient: "Cliente",
+            paymentCollected: true,
+          });
+          assert.equal(completed.status, "DELIVERED");
+          assert.equal(
+            (await ok(`driver/deliveries/${b.id}`, "driver")).status,
+            "OUT_FOR_DELIVERY",
+          );
+          const returned = await cmd(first.items[1], "issue", "driver", {
+            reason: "Cliente ausente",
+          });
+          await cmd(returned, "return", "driver");
+        },
+      );
 
       await t.test(
         "horários, reservas, confirmação antecipada e liberação idempotente",
@@ -1202,6 +1446,143 @@ test(
           });
           assert.equal(result.revoked, true);
           assert.equal((await api("me", "customer2")).status, 401);
+        },
+      );
+
+      await t.test(
+        "limites autenticados separam usuários e Retry-After reflete a janela",
+        async () => {
+          const rateKey = tokenHash(
+            `http:user:${main.store.id}:${ids.manager}`,
+          );
+          await db.rateBucket.upsert({
+            where: { key: rateKey },
+            create: {
+              key: rateKey,
+              count: 600,
+              resetsAt: new Date(Date.now() + 55_000),
+            },
+            update: { count: 600, resetsAt: new Date(Date.now() + 55_000) },
+          });
+          try {
+            const limited = await api("me", "manager");
+            assert.equal(limited.status, 429);
+            assert.ok(Number(limited.headers.get("retry-after")) > 0);
+            assert.ok(Number(limited.headers.get("retry-after")) <= 55);
+            assert.equal((await api("me", "customer")).status, 200);
+          } finally {
+            await db.rateBucket.delete({ where: { key: rateKey } });
+          }
+          const key = `test-rate:${slug}`;
+          try {
+            const auth = app.get(AuthService);
+            await auth.rate(key, 1, 60);
+            await assert.rejects(
+              () => auth.rate(key, 1, 60),
+              (e: unknown) =>
+                e instanceof RateLimitError &&
+                e.retryAfterSeconds > 0 &&
+                e.retryAfterSeconds <= 60,
+            );
+          } finally {
+            await db.rateBucket.delete({ where: { key: tokenHash(key) } });
+          }
+        },
+      );
+      await t.test(
+        "cadastro público pode ser suspenso sem revogar quem já usa a loja",
+        async () => {
+          process.env.CUSTOMER_REGISTRATION_ENABLED = "false";
+          try {
+            const r = await api("customers", undefined, "POST", {
+              storeSlug: slug,
+              email: "blocked@example.com",
+              password,
+              name: "Cliente bloqueado",
+              phone: "5511999999999",
+            });
+            assert.equal(r.status, 503);
+            assert.equal(r.data.code, "REGISTRATION_DISABLED");
+            assert.equal((await api("me", "customer")).status, 200);
+            assert.equal(
+              await db.user.count({
+                where: { storeId: main.store.id, email: "blocked@example.com" },
+              }),
+              0,
+            );
+          } finally {
+            process.env.CUSTOMER_REGISTRATION_ENABLED = "true";
+          }
+        },
+      );
+
+      await t.test(
+        "login atualiza hash legado sem mudar senha ou permitir conta desativada",
+        async () => {
+          const salt = "2".repeat(32);
+          const key = await new Promise<Buffer>((resolve, reject) =>
+            scrypt(
+              password,
+              salt,
+              64,
+              { N: 32768, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
+              (e, k) => (e ? reject(e) : resolve(k)),
+            ),
+          );
+          const legacy = ["scrypt", salt, key.toString("hex")].join("$");
+          const account = await db.user.create({
+            data: {
+              storeId: main.store.id,
+              name: "Legado teste",
+              email: "legacy@example.com",
+              phone: "5511999999999",
+              role: "KITCHEN",
+              passwordHash: legacy,
+            },
+          });
+          await login("legacy");
+          const updated = await db.user.findUniqueOrThrow({
+            where: { id: account.id },
+          });
+          assert.ok(updated.passwordHash.startsWith("scrypt$v2$"));
+          assert.equal(updated.role, account.role);
+          assert.equal((await api("me", "legacy")).status, 200);
+          assert.equal(
+            await db.audit.count({
+              where: {
+                storeId: main.store.id,
+                actorId: account.id,
+                action: "user.password.rehashed",
+              },
+            }),
+            1,
+          );
+          await login("legacy");
+          assert.equal(
+            await db.audit.count({
+              where: {
+                storeId: main.store.id,
+                actorId: account.id,
+                action: "user.password.rehashed",
+              },
+            }),
+            1,
+          );
+          await db.user.update({
+            where: { id: account.id },
+            data: { enabled: false },
+          });
+          assert.equal((await api("me", "legacy")).status, 401);
+          assert.equal(
+            (
+              await api("sessions", undefined, "POST", {
+                storeSlug: slug,
+                email: account.email,
+                password,
+              })
+            ).status,
+            401,
+          );
         },
       );
       await t.test(

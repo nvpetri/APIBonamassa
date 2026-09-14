@@ -7,43 +7,23 @@ import {
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { Role, User } from "@prisma/client";
-import {
-  randomBytes,
-  scrypt as nodeScrypt,
-  timingSafeEqual,
-} from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { Request } from "express";
 import { z } from "zod";
 import { Db, Tx, json, tokenHash } from "./db";
 import { config } from "./config";
 import { ensure, loginSchema, registerSchema, RuleError } from "./domain";
 import { ChangeBus } from "./realtime";
+import { RateLimitError, retryAfterSeconds } from "./rate-limit";
 
-const derive = (password: string, salt: string): Promise<Buffer> =>
-  new Promise((resolve, reject) =>
-    nodeScrypt(
-      password,
-      salt,
-      64,
-      { N: 32768, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
-      (err, key) => (err ? reject(err) : resolve(key)),
-    ),
-  );
-export async function hashPassword(password: string) {
-  const salt = randomBytes(16).toString("hex");
-  return `scrypt$${salt}$${(await derive(password, salt)).toString("hex")}`;
-}
-async function verify(password: string, hash: string) {
-  const [algorithm, salt, expected] = hash.split("$");
-  if (algorithm !== "scrypt" || !salt || !/^[0-9a-f]{128}$/.test(expected))
-    return false;
-  return timingSafeEqual(
-    await derive(password, salt),
-    Buffer.from(expected, "hex"),
-  );
-}
-// Fixed dummy hash gives missing accounts the same expensive password check.
-const dummyHash = `scrypt$00000000000000000000000000000000$${"0".repeat(128)}`;
+import {
+  dummyPasswordHash,
+  hashPassword,
+  needsPasswordUpgrade,
+  verifyPassword,
+} from "./password";
+export { hashPassword } from "./password";
+
 export type Actor = Pick<
   User,
   "id" | "storeId" | "role" | "name" | "phone" | "email"
@@ -73,23 +53,19 @@ export class AuthService {
     private readonly bus: ChangeBus,
   ) {}
   async rate(key: string, limit: number, seconds: number) {
-    const rows = await this.db.$queryRaw<{ count: number }[]>`
+    const rows = await this.db.$queryRaw<{ count: number; resetsAt: Date }[]>`
       INSERT INTO "RateBucket" ("key", "count", "resetsAt") VALUES (${tokenHash(key)}, 1, now() + make_interval(secs => ${seconds}))
       ON CONFLICT ("key") DO UPDATE SET
       "count" = CASE WHEN "RateBucket"."resetsAt" <= now() THEN 1 ELSE "RateBucket"."count" + 1 END,
       "resetsAt" = CASE WHEN "RateBucket"."resetsAt" <= now() THEN now() + make_interval(secs => ${seconds}) ELSE "RateBucket"."resetsAt" END
-      RETURNING "count"`;
-    ensure(
-      rows[0].count <= limit,
-      "RATE_LIMITED",
-      "Muitas tentativas. Aguarde antes de tentar novamente.",
-      429,
-    );
+      RETURNING "count", "resetsAt"`;
+    if (rows[0].count > limit)
+      throw new RateLimitError(retryAfterSeconds(rows[0].resetsAt));
   }
-  async issue(user: User) {
+  async issue(user: User, tx: Tx = this.db) {
     const accessToken = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + config().SESSION_HOURS * 3600_000);
-    await this.db.session.create({
+    await tx.session.create({
       data: { userId: user.id, tokenHash: tokenHash(accessToken), expiresAt },
     });
     return { accessToken, tokenType: "Bearer", expiresAt, user: userDto(user) };
@@ -104,20 +80,59 @@ export class AuthService {
       (await this.db.user.findUnique({
         where: { storeId_email: { storeId: store.id, email: input.email } },
       }));
-    const valid = await verify(input.password, user?.passwordHash ?? dummyHash);
+    const valid = await verifyPassword(
+      input.password,
+      user?.passwordHash ?? dummyPasswordHash,
+    );
     ensure(
       user?.enabled && valid,
       "INVALID_CREDENTIALS",
       "E-mail ou senha inválidos.",
       401,
     );
-    return this.issue(user);
+    const upgradedHash = needsPasswordUpgrade(user.passwordHash)
+      ? await hashPassword(input.password)
+      : null;
+    return this.db.write(user.storeId, async (tx) => {
+      const current = await tx.user.findUniqueOrThrow({
+        where: { id: user.id },
+      });
+      ensure(
+        current.enabled && current.passwordHash === user.passwordHash,
+        "INVALID_CREDENTIALS",
+        "E-mail ou senha inválidos.",
+        401,
+      );
+      if (upgradedHash) {
+        await tx.user.update({
+          where: { id: current.id },
+          data: { passwordHash: upgradedHash },
+        });
+        await tx.audit.create({
+          data: {
+            storeId: current.storeId,
+            actorId: current.id,
+            action: "user.password.rehashed",
+            data: json({ userId: current.id }),
+          },
+        });
+      }
+      return this.issue(current, tx);
+    });
   }
   async register(input: z.infer<typeof registerSchema>) {
+    ensure(
+      config().CUSTOMER_REGISTRATION_ENABLED === "true",
+      "REGISTRATION_DISABLED",
+      "Novos cadastros estão temporariamente indisponíveis. Entre com sua conta ou fale com a pizzaria.",
+      503,
+    );
     const store = await this.db.store.findUnique({
       where: { slug: input.storeSlug },
     });
     ensure(store, "STORE_NOT_FOUND", "Loja não encontrada.", 404);
+    await this.rate(`register:store:${store.id}`, 30, 3600);
+    await this.rate(`register:email:${store.id}:${input.email}`, 3, 3600);
     const passwordHash = await hashPassword(input.password);
     const user = await this.db.write(store.id, (tx) =>
       tx.user.create({
@@ -193,7 +208,7 @@ export class AuthService {
       where: { id: actor.id },
     });
     ensure(
-      await verify(current, user.passwordHash),
+      await verifyPassword(current, user.passwordHash),
       "INVALID_CREDENTIALS",
       "Senha atual incorreta.",
       401,
@@ -246,14 +261,18 @@ export class AccessGuard implements CanActivate {
       ctx.getHandler(),
       ctx.getClass(),
     ]);
-    // Express does not trust X-Forwarded-For by default. Never accept client-supplied IPs.
-    const sensitive = /^\/v1\/(sessions|customers)$/.test(req.path);
-    await this.auth.rate(
-      `http:${sensitive ? "auth" : "general"}:${req.ip}`,
-      sensitive ? 60 : 600,
-      60,
-    );
-    if (isPublic) return true;
+    // Only explicitly trusted proxies affect req.ip. Never read XFF directly.
+    // A coarse edge ceiling still bounds authentication/DB work.
+    await this.auth.rate(`http:edge:${req.ip}`, 6000, 60);
+    if (isPublic) {
+      const sensitive = /^\/v1\/(sessions|customers)$/.test(req.path);
+      await this.auth.rate(
+        `http:${sensitive ? "auth" : "anonymous"}:${req.ip}`,
+        sensitive ? 60 : 600,
+        60,
+      );
+      return true;
+    }
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer "))
       throw new RuleError(
@@ -262,6 +281,13 @@ export class AccessGuard implements CanActivate {
         401,
       );
     req.actor = await this.auth.authenticate(header.slice(7));
+    // Separate authenticated staff/customers even behind the same BFF/NAT.
+    // Using user identity instead of token prevents bypass by creating sessions.
+    await this.auth.rate(
+      `http:user:${req.actor.storeId}:${req.actor.id}`,
+      600,
+      60,
+    );
     const roles = this.reflector.getAllAndOverride<Role[]>("roles", [
       ctx.getHandler(),
       ctx.getClass(),

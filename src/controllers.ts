@@ -42,6 +42,7 @@ import {
   registerSchema,
   slugSchema,
   staffSchema,
+  startRouteSchema,
   storeSchema,
   uuid,
 } from "./domain";
@@ -643,6 +644,23 @@ export class ApiController {
       uuid.parse(id),
       "cancel",
       reasonSchema.parse(body),
+    );
+  }
+
+  @Post("driver/routes/start")
+  @Roles("DRIVER")
+  @Mutation()
+  @BodyDoc(startRouteSchema)
+  @ApiTags("Entregas")
+  startRoute(
+    @Current() actor: Actor,
+    @Headers("idempotency-key") key: string,
+    @Body() body: unknown,
+  ) {
+    return this.orders.startRoute(
+      actor,
+      keySchema.parse(key),
+      startRouteSchema.parse(body),
     );
   }
 

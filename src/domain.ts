@@ -120,15 +120,27 @@ export type Promotion = z.infer<typeof promotionSchema> & {
   reserved: number;
   sold: number;
 };
-export const addressSchema = z.strictObject({
-  street: shortText(120),
-  number: shortText(20),
-  neighborhood: shortText(80),
-  city: shortText(80),
-  state: z.string().regex(/^[A-Z]{2}$/),
-  postalCode: z.string().regex(/^\d{8}$/),
-  reference: note,
-});
+export const addressSchema = z
+  .strictObject({
+    street: shortText(120),
+    number: shortText(20),
+    neighborhood: shortText(80),
+    city: shortText(80),
+    state: z.string().regex(/^[A-Z]{2}$/),
+    postalCode: z.string().regex(/^\d{8}$/),
+    reference: note,
+    // Optional for compatibility with already distributed apps and saved quotes.
+    complement: note.optional(),
+    noComplement: z.boolean().optional(),
+  })
+  .superRefine((address, ctx) => {
+    if (address.noComplement && address.complement?.trim())
+      ctx.addIssue({
+        code: "custom",
+        path: ["complement"],
+        message: "Remova o complemento ou desmarque a opção sem complemento.",
+      });
+  });
 export const phoneSchema = z
   .string()
   .regex(
@@ -389,6 +401,25 @@ export function price(
 export const actionSchema = z.strictObject({ expectedVersion: versionSchema });
 export const reasonSchema = actionSchema.extend({ reason: shortText(240) });
 export const assignSchema = actionSchema.extend({ driverId: uuid });
+export const startRouteSchema = z
+  .strictObject({
+    deliveries: z
+      .array(z.strictObject({ id: uuid, expectedVersion: versionSchema }))
+      .min(1)
+      .max(100),
+    confirmCollected: z.literal(true),
+  })
+  .superRefine((route, ctx) => {
+    if (
+      new Set(route.deliveries.map((d) => d.id)).size !==
+      route.deliveries.length
+    )
+      ctx.addIssue({
+        code: "custom",
+        path: ["deliveries"],
+        message: "Não repita pedidos na rota.",
+      });
+  });
 export const completeSchema = actionSchema.extend({
   recipient: shortText(80),
   paymentCollected: z.boolean(),
