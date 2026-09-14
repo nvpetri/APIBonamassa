@@ -15,6 +15,7 @@ import { OrdersService } from "./orders";
 import { ChangeBus, attachRealtime } from "./realtime";
 import { StaffService } from "./staff";
 import { Writes } from "./writes";
+import { SchedulingService } from "./scheduling";
 
 @Module({
   controllers: [ApiController],
@@ -26,6 +27,7 @@ import { Writes } from "./writes";
     StaffService,
     Writes,
     ChangeBus,
+    SchedulingService,
     { provide: APP_GUARD, useClass: AccessGuard },
   ],
 })

@@ -19,6 +19,8 @@ import {
   validateRecipe,
 } from "./domain";
 import { Writes, audit, checkVersion } from "./writes";
+import { operation, operationDto } from "./schedule";
+import { SchedulingService } from "./scheduling";
 
 export const decodeProduct = (row: {
   id: string;
@@ -66,8 +68,12 @@ export class CatalogService {
   constructor(
     private readonly db: Db,
     private readonly writes: Writes,
+    private readonly scheduling: SchedulingService,
   ) {}
   async catalog(slug: string, staff = false) {
+    const target = await this.db.store.findUnique({ where: { slug } });
+    ensure(target, "STORE_NOT_FOUND", "Loja não encontrada.", 404);
+    await this.scheduling.reconcile(target.id);
     return this.db.$transaction(
       async (tx) => {
         const store = await tx.store.findUnique({ where: { slug } });
@@ -107,7 +113,7 @@ export class CatalogService {
             id: store.id,
             slug,
             name: store.name,
-            open: store.open,
+            ...operationDto(store),
             deliveryFee: store.deliveryFee,
             ...(staff ? { driverFee: store.driverFee } : {}),
             version: store.version,
@@ -307,27 +313,71 @@ export class CatalogService {
   }
   saveStore(actor: Actor, key: string, input: z.infer<typeof storeSchema>) {
     return this.writes.run(actor, key, "store:update", input, async (tx) => {
+      ensure(actor.role === "MANAGER", "FORBIDDEN", "Somente o gerente pode alterar a operação.", 403);
       const previous = await tx.store.findUniqueOrThrow({
         where: { id: actor.storeId },
       });
       checkVersion(previous.version, input.expectedVersion);
-      const { expectedVersion: _version, ...data } = input;
+      const {
+        expectedVersion: _version, open, confirmEarlyOpen, resumeSchedule,
+        ...data
+      } = input;
+      const candidate = { ...previous, ...data };
+      ensure(candidate.opensAt !== candidate.closesAt, "INVALID_HOURS",
+        "A abertura e o fechamento devem ter horários diferentes.", 400);
+      const changedHours = candidate.opensAt !== previous.opensAt ||
+        candidate.closesAt !== previous.closesAt ||
+        candidate.scheduleEnabled !== previous.scheduleEnabled;
+      // Do not silently rewrite a time already promised to a customer.
+      if (changedHours) {
+        ensure(!(await tx.order.count({
+          where: { storeId: actor.storeId, status: "SCHEDULED" },
+        })), "SCHEDULE_HAS_RESERVATIONS",
+        "Há pedidos agendados. Atenda ou cancele essas reservas antes de mudar o horário.", 409);
+      }
+      if (changedHours || resumeSchedule) {
+        candidate.overrideOpen = null;
+        candidate.overrideUntil = null;
+      }
+      const now = new Date();
+      const state = operation(candidate, now);
+      if (open !== undefined && open !== state.open) {
+        ensure(!open || !candidate.scheduleEnabled || state.scheduledOpen || confirmEarlyOpen,
+          "EARLY_OPEN_CONFIRMATION_REQUIRED",
+          "Confirme a abertura fora do horário. As reservas da próxima abertura serão liberadas.", 409);
+        if (candidate.scheduleEnabled) {
+          candidate.overrideOpen = open;
+          candidate.overrideUntil = state.nextBoundary;
+        } else {
+          candidate.open = open;
+        }
+      }
       const saved = await tx.store.update({
         where: { id: actor.storeId },
-        data: { ...data, version: { increment: 1 } },
+        data: {
+          ...data,
+          open: operation(candidate, now).open,
+          overrideOpen: candidate.overrideOpen,
+          overrideUntil: candidate.overrideUntil,
+          version: { increment: 1 },
+        },
       });
-      await audit(tx, actor, "store.updated", data);
+      const result = await this.scheduling.sync(tx, saved, now);
+      await audit(tx, actor, "store.updated", {
+        ...data, open, confirmEarlyOpen, resumeSchedule,
+        overrideUntil: result.store.overrideUntil,
+      });
       return {
         data: {
-          id: saved.id,
-          slug: saved.slug,
-          name: saved.name,
-          open: saved.open,
-          deliveryFee: saved.deliveryFee,
-          driverFee: saved.driverFee,
-          version: saved.version,
+          id: result.store.id,
+          slug: result.store.slug,
+          name: result.store.name,
+          ...operationDto(result.store, now),
+          deliveryFee: result.store.deliveryFee,
+          driverFee: result.store.driverFee,
+          version: result.store.version,
         },
-        events: [{ type: "store.updated", storeId: actor.storeId }],
+        events: [{ type: "store.updated", storeId: actor.storeId }, ...result.events],
       };
     });
   }
