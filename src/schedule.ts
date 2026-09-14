@@ -4,7 +4,12 @@ import type { Store } from "@prisma/client";
 export const STORE_TIME_ZONE = "America/Sao_Paulo";
 export type Schedule = Pick<
   Store,
-  "open" | "scheduleEnabled" | "opensAt" | "closesAt" | "overrideOpen" | "overrideUntil"
+  | "open"
+  | "scheduleEnabled"
+  | "opensAt"
+  | "closesAt"
+  | "overrideOpen"
+  | "overrideUntil"
 >;
 const formatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: STORE_TIME_ZONE,
@@ -18,19 +23,26 @@ const formatter = new Intl.DateTimeFormat("en-CA", {
 });
 function localParts(date: Date) {
   return Object.fromEntries(
-    formatter.formatToParts(date).map((part) => [part.type, Number(part.value)]),
+    formatter
+      .formatToParts(date)
+      .map((part) => [part.type, Number(part.value)]),
   );
 }
 function localInstant(day: Date, time: string) {
   const [hour, minute] = time.split(":").map(Number);
   const target = Date.UTC(
-    day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), hour, minute,
+    day.getUTCFullYear(),
+    day.getUTCMonth(),
+    day.getUTCDate(),
+    hour,
+    minute,
   );
   let result = target;
   // Resolve the civil time with IANA timezone data (no fixed UTC-3 offset).
   for (let i = 0; i < 3; i++) {
     const p = localParts(new Date(result));
-    result += target - Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+    result +=
+      target - Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
   }
   return new Date(result);
 }
@@ -43,9 +55,10 @@ export function operation(store: Schedule, now = new Date()) {
   };
   const start = toMinute(store.opensAt);
   const end = toMinute(store.closesAt);
-  const scheduledOpen = start < end
-    ? minute >= start && minute < end
-    : minute >= start || minute < end;
+  const scheduledOpen =
+    start < end
+      ? minute >= start && minute < end
+      : minute >= start || minute < end;
   const dates = [0, 1, 2].map(
     (offset) => new Date(Date.UTC(p.year, p.month - 1, p.day + offset)),
   );
@@ -55,10 +68,15 @@ export function operation(store: Schedule, now = new Date()) {
   const nextBoundary = [...openings, ...closings]
     .filter((date) => +date > +now)
     .sort((a, b) => +a - +b)[0];
-  const overridden = store.scheduleEnabled && store.overrideOpen !== null &&
-    store.overrideUntil !== null && +store.overrideUntil > +now;
+  const overridden =
+    store.scheduleEnabled &&
+    store.overrideOpen !== null &&
+    store.overrideUntil !== null &&
+    +store.overrideUntil > +now;
   const open = store.scheduleEnabled
-    ? overridden ? store.overrideOpen! : scheduledOpen
+    ? overridden
+      ? store.overrideOpen!
+      : scheduledOpen
     : store.open;
   return {
     open,

@@ -19,7 +19,10 @@ import { operation, STORE_TIME_ZONE } from "./schedule";
 import { SchedulingService } from "./scheduling";
 
 type Loaded = Order & { events: OrderEvent[] };
-type ScheduledPrice = Priced & { scheduledFor: string | null; timeZone: string };
+type ScheduledPrice = Priced & {
+  scheduledFor: string | null;
+  timeZone: string;
+};
 export type Action =
   | "accept"
   | "prepare"
@@ -58,7 +61,9 @@ const permissions: Record<Action, Role[]> = {
 function scoped(actor: Actor): Prisma.OrderWhereInput {
   return {
     storeId: actor.storeId,
-    ...(actor.role === "KITCHEN" ? { AND: [{ status: { not: "SCHEDULED" as const } }] } : {}),
+    ...(actor.role === "KITCHEN"
+      ? { AND: [{ status: { not: "SCHEDULED" as const } }] }
+      : {}),
     ...(actor.role === "CUSTOMER"
       ? { customerId: actor.id }
       : actor.role === "DRIVER"
@@ -78,6 +83,8 @@ function orderDto(order: Loaded, actor: Actor) {
     version: order.version,
     status: order.status,
     scheduledFor: order.scheduledFor,
+    queuedAt: order.status === "SCHEDULED" ? null :
+      order.events.find((e) => e.action === "schedule-released")?.createdAt ?? order.createdAt,
     timeZone: STORE_TIME_ZONE,
     deliveryStatus: order.deliveryStatus,
     mode: order.mode,
@@ -183,11 +190,14 @@ export class OrdersService {
   private async calculate(tx: Tx, storeId: string, draft: Draft) {
     const store = await tx.store.findUniqueOrThrow({ where: { id: storeId } });
     const state = operation(store);
-    ensure(state.open || (state.reservationsAvailable && draft.allowScheduling),
+    ensure(
+      state.open || (state.reservationsAvailable && draft.allowScheduling),
       "STORE_CLOSED",
       state.reservationsAvailable
         ? "A loja está fechada. Atualize a cotação para reservar para a próxima abertura."
-        : "A loja está fechada para novos pedidos.", 409);
+        : "A loja está fechada para novos pedidos.",
+      409,
+    );
     const products = (await tx.product.findMany({ where: { storeId } })).map(
       decodeProduct,
     );
@@ -198,7 +208,9 @@ export class OrdersService {
       : null;
     return {
       ...price(
-        products, draft, draft.mode === "DELIVERY" ? store.deliveryFee : 0,
+        products,
+        draft,
+        draft.mode === "DELIVERY" ? store.deliveryFee : 0,
         promo ? decodePromotion(promo) : null,
       ),
       scheduledFor: state.open ? null : state.nextOpening,
@@ -283,13 +295,25 @@ export class OrdersService {
         const reserved = await tx.order.count({
           where: { storeId: actor.storeId, status: "SCHEDULED" },
         });
-        ensure(reserved < 500, "RESERVATION_LIMIT",
-          "A loja atingiu o limite de reservas. Entre em contato com a pizzaria.", 409);
-        if (actor.role === "CUSTOMER") ensure(
-          (await tx.order.count({
-            where: { storeId: actor.storeId, customerId: actor.id, status: "SCHEDULED" },
-          })) < 3, "CUSTOMER_RESERVATION_LIMIT",
-          "Você já tem 3 reservas ativas. Acompanhe ou cancele uma delas antes de reservar novamente.", 409);
+        ensure(
+          reserved < 500,
+          "RESERVATION_LIMIT",
+          "A loja atingiu o limite de reservas. Entre em contato com a pizzaria.",
+          409,
+        );
+        if (actor.role === "CUSTOMER")
+          ensure(
+            (await tx.order.count({
+              where: {
+                storeId: actor.storeId,
+                customerId: actor.id,
+                status: "SCHEDULED",
+              },
+            })) < 3,
+            "CUSTOMER_RESERVATION_LIMIT",
+            "Você já tem 3 reservas ativas. Acompanhe ou cancele uma delas antes de reservar novamente.",
+            409,
+          );
       }
       const store = await tx.store.update({
         where: { id: actor.storeId },
@@ -308,7 +332,9 @@ export class OrdersService {
           number: store.nextNumber,
           quoteId,
           status: priced.scheduledFor ? "SCHEDULED" : "NEW",
-          scheduledFor: priced.scheduledFor ? new Date(priced.scheduledFor) : null,
+          scheduledFor: priced.scheduledFor
+            ? new Date(priced.scheduledFor)
+            : null,
           customerId: actor.role === "CUSTOMER" ? actor.id : null,
           customer: json(draft.customer),
           address: draft.address ? json(draft.address) : Prisma.DbNull,
@@ -413,10 +439,12 @@ export class OrdersService {
         }
         if (action === "cancel") {
           must(
-            ["SCHEDULED", "NEW", "CONFIRMED", "PREPARING", "READY"].includes(order.status) &&
-              order.deliveryStatus !== "COLLECTED",
+            ["SCHEDULED", "NEW", "CONFIRMED", "PREPARING", "READY"].includes(
+              order.status,
+            ) && order.deliveryStatus !== "COLLECTED",
           );
-          if (actor.role === "CUSTOMER") must(["SCHEDULED", "NEW"].includes(order.status));
+          if (actor.role === "CUSTOMER")
+            must(["SCHEDULED", "NEW"].includes(order.status));
           data.status = "CANCELLED";
           data.deliveryStatus = null;
           data.driverId = null;

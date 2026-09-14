@@ -402,8 +402,14 @@ export const storeSchema = actionSchema.extend({
   name: shortText(100),
   open: z.boolean().optional(),
   scheduleEnabled: z.boolean().optional(),
-  opensAt: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
-  closesAt: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  opensAt: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .optional(),
+  closesAt: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .optional(),
   confirmEarlyOpen: z.boolean().optional(),
   resumeSchedule: z.boolean().optional(),
   deliveryFee: cents.max(10000),

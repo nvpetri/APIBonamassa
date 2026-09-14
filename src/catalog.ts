@@ -313,27 +313,44 @@ export class CatalogService {
   }
   saveStore(actor: Actor, key: string, input: z.infer<typeof storeSchema>) {
     return this.writes.run(actor, key, "store:update", input, async (tx) => {
-      ensure(actor.role === "MANAGER", "FORBIDDEN", "Somente o gerente pode alterar a operação.", 403);
+      ensure(
+        actor.role === "MANAGER",
+        "FORBIDDEN",
+        "Somente o gerente pode alterar a operação.",
+        403,
+      );
       const previous = await tx.store.findUniqueOrThrow({
         where: { id: actor.storeId },
       });
       checkVersion(previous.version, input.expectedVersion);
       const {
-        expectedVersion: _version, open, confirmEarlyOpen, resumeSchedule,
+        expectedVersion: _version,
+        open,
+        confirmEarlyOpen,
+        resumeSchedule,
         ...data
       } = input;
       const candidate = { ...previous, ...data };
-      ensure(candidate.opensAt !== candidate.closesAt, "INVALID_HOURS",
-        "A abertura e o fechamento devem ter horários diferentes.", 400);
-      const changedHours = candidate.opensAt !== previous.opensAt ||
+      ensure(
+        candidate.opensAt !== candidate.closesAt,
+        "INVALID_HOURS",
+        "A abertura e o fechamento devem ter horários diferentes.",
+        400,
+      );
+      const changedHours =
+        candidate.opensAt !== previous.opensAt ||
         candidate.closesAt !== previous.closesAt ||
         candidate.scheduleEnabled !== previous.scheduleEnabled;
       // Do not silently rewrite a time already promised to a customer.
       if (changedHours) {
-        ensure(!(await tx.order.count({
-          where: { storeId: actor.storeId, status: "SCHEDULED" },
-        })), "SCHEDULE_HAS_RESERVATIONS",
-        "Há pedidos agendados. Atenda ou cancele essas reservas antes de mudar o horário.", 409);
+        ensure(
+          !(await tx.order.count({
+            where: { storeId: actor.storeId, status: "SCHEDULED" },
+          })),
+          "SCHEDULE_HAS_RESERVATIONS",
+          "Há pedidos agendados. Atenda ou cancele essas reservas antes de mudar o horário.",
+          409,
+        );
       }
       if (changedHours || resumeSchedule) {
         candidate.overrideOpen = null;
@@ -342,9 +359,15 @@ export class CatalogService {
       const now = new Date();
       const state = operation(candidate, now);
       if (open !== undefined && open !== state.open) {
-        ensure(!open || !candidate.scheduleEnabled || state.scheduledOpen || confirmEarlyOpen,
+        ensure(
+          !open ||
+            !candidate.scheduleEnabled ||
+            state.scheduledOpen ||
+            confirmEarlyOpen,
           "EARLY_OPEN_CONFIRMATION_REQUIRED",
-          "Confirme a abertura fora do horário. As reservas da próxima abertura serão liberadas.", 409);
+          "Confirme a abertura fora do horário. As reservas da próxima abertura serão liberadas.",
+          409,
+        );
         if (candidate.scheduleEnabled) {
           candidate.overrideOpen = open;
           candidate.overrideUntil = state.nextBoundary;
@@ -364,7 +387,10 @@ export class CatalogService {
       });
       const result = await this.scheduling.sync(tx, saved, now);
       await audit(tx, actor, "store.updated", {
-        ...data, open, confirmEarlyOpen, resumeSchedule,
+        ...data,
+        open,
+        confirmEarlyOpen,
+        resumeSchedule,
         overrideUntil: result.store.overrideUntil,
       });
       return {
@@ -377,7 +403,10 @@ export class CatalogService {
           driverFee: result.store.driverFee,
           version: result.store.version,
         },
-        events: [{ type: "store.updated", storeId: actor.storeId }, ...result.events],
+        events: [
+          { type: "store.updated", storeId: actor.storeId },
+          ...result.events,
+        ],
       };
     });
   }
