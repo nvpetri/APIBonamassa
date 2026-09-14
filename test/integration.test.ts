@@ -384,6 +384,78 @@ test(
       );
 
       await t.test(
+        "reservas vencidas recuperam após reinício, sem evento duplicado",
+        async () => {
+          const current = (await ok("staff/catalog", "manager")).store;
+          const clock = (offset: number) =>
+            new Intl.DateTimeFormat("en-GB", {
+              timeZone: "America/Sao_Paulo",
+              hour: "2-digit",
+              minute: "2-digit",
+              hourCycle: "h23",
+            }).format(new Date(Date.now() + offset * 60_000));
+          await ok("staff/store", "manager", "PATCH", {
+            expectedVersion: current.version,
+            name: current.name,
+            deliveryFee: current.deliveryFee,
+            driverFee: current.driverFee,
+            scheduleEnabled: true,
+            opensAt: clock(60),
+            closesAt: clock(180),
+          });
+          const reserved = await order("customer", { allowScheduling: true });
+          // Isolated fixture represents a process that stopped before opening.
+          // No test clock or scheduling override is exposed through HTTP.
+          await app.close();
+          await db.store.update({
+            where: { id: main.store.id },
+            data: { opensAt: clock(-60), closesAt: clock(60), open: false },
+          });
+          await db.order.update({
+            where: { id: reserved.id },
+            data: { scheduledFor: new Date() },
+          });
+          app = await createApp(true);
+          await app.listen(0, "127.0.0.1");
+          base = await app.getUrl();
+          await Promise.all([
+            ok("staff/catalog", "manager"),
+            ok("staff/orders", "kitchen"),
+            ok("me/orders", "customer"),
+          ]);
+          const released = await ok(`orders/${reserved.id}`, "customer");
+          assert.equal(released.status, "NEW");
+          assert.equal(released.version, reserved.version + 1);
+          assert.equal(
+            released.events.filter(
+              (event: any) => event.action === "schedule-released",
+            ).length,
+            1,
+          );
+          assert.ok(released.queuedAt);
+          // Automatic close never cancels or holds an order already released.
+          await db.store.update({
+            where: { id: main.store.id },
+            data: { opensAt: clock(60), closesAt: clock(180) },
+          });
+          assert.equal((await ok("staff/catalog", "manager")).store.open, false);
+          assert.equal((await ok(`orders/${reserved.id}`, "customer")).status, "NEW");
+          await cmd(released, "cancel", "customer", { reason: "Fim do teste" });
+          const last = (await ok("staff/catalog", "manager")).store;
+          await ok("staff/store", "manager", "PATCH", {
+            expectedVersion: last.version,
+            name: last.name,
+            deliveryFee: last.deliveryFee,
+            driverFee: last.driverFee,
+            scheduleEnabled: false,
+            opensAt: current.opensAt,
+            closesAt: current.closesAt,
+            open: true,
+          });
+        },
+      );
+
+      await t.test(
         "health e OpenAPI; autenticação obrigatória e campos privados ausentes",
         async () => {
           assert.equal((await ok("health")).status, "ok");
