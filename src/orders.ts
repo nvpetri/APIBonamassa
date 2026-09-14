@@ -83,8 +83,11 @@ function orderDto(order: Loaded, actor: Actor) {
     version: order.version,
     status: order.status,
     scheduledFor: order.scheduledFor,
-    queuedAt: order.status === "SCHEDULED" ? null :
-      order.events.find((e) => e.action === "schedule-released")?.createdAt ?? order.createdAt,
+    queuedAt:
+      order.status === "SCHEDULED"
+        ? null
+        : (order.events.find((e) => e.action === "schedule-released")
+            ?.createdAt ?? order.createdAt),
     timeZone: STORE_TIME_ZONE,
     deliveryStatus: order.deliveryStatus,
     mode: order.mode,
