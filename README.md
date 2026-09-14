@@ -109,3 +109,7 @@ O pedido aceita dinheiro ou cartão no recebimento. Um gestor pode registrar um 
 A taxa de entrega é fixa por loja; a comissão do entregador é separada. Horários, bairros atendidos, cardápio real e regras comerciais ainda precisam ser confirmados com a pizzaria. Os nomes de tamanhos seguem o painel; o app cliente precisa ser alinhado antes de vender.
 
 O servidor atende uma instância da API por enquanto. O banco separa lojas e serializa mutações por estabelecimento; os avisos Socket.IO estão no processo. REST e reconsulta após reconexão são obrigatórios. Não há promessa de sincronização offline nem confirmação de entrega de cada aviso.
+
+## Preparação para produção
+
+Antes de publicar as mudanças, leia o [manual operacional completo](docs/producao/README.md). Inclui novas variáveis obrigatórias, separação de ambientes, deploy sem seed permanente, backup/restore e critérios de liberação. Não mesclar em branch com auto-deploy antes de revisar a configuração.
