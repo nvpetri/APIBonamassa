@@ -1,3 +1,5 @@
+> Atualização: a preparação posterior, as proteções adicionais e as pendências para lançamento estão no [manual de produção](producao/README.md). Esta página registra a avaliação inicial da etapa de horários.
+
 # Segurança: avaliação preliminar para produção
 
 **Data: 14/09/2026. Escopo: leitura do código e testes disponíveis, não pentest nem certificação.**

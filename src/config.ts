@@ -1,6 +1,8 @@
 import { z } from "zod";
+import { deployment } from "./deployment";
 
-export function config() {
+export function config(env: NodeJS.ProcessEnv = process.env) {
+  const deploy = deployment(env);
   const e = z
     .object({
       NODE_ENV: z
@@ -11,8 +13,9 @@ export function config() {
       CORS_ORIGINS: z.string().default("http://localhost:3000"),
       DOCS_ENABLED: z.enum(["true", "false"]).default("false"),
       SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
+      CUSTOMER_REGISTRATION_ENABLED: z.enum(["true", "false"]).default("true"),
     })
-    .parse(process.env);
+    .parse(env);
   const origins = e.CORS_ORIGINS.split(",")
     .map((v) => v.trim())
     .filter(Boolean);
@@ -27,5 +30,5 @@ export function config() {
         "CORS_ORIGINS deve conter origens explícitas, HTTPS em produção.",
       );
   }
-  return { ...e, origins };
+  return { ...e, origins, ...deploy };
 }
