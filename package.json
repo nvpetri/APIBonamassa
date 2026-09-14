@@ -13,7 +13,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "node --env-file-if-exists=.env dist/prisma/seed.js",
-    "test": "npm run build && node --test dist/test/domain.test.js",
+    "test": "npm run build && node --test dist/test/domain.test.js dist/test/schedule.test.js",
     "test:integration": "npm run build && node --env-file-if-exists=.env --test dist/test/integration.test.js",
     "format": "prettier --write .",
     "check": "tsc --noEmit && prettier --check .",

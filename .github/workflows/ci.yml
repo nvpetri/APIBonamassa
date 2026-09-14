@@ -33,6 +33,11 @@ jobs:
       - run: npm run db:migrate
       - run: npm test
       - run: npm run check
+      - name: Show formatting corrections
+        if: failure()
+        run: |
+          npx --no-install prettier --write .
+          git diff
       - run: npm run test:integration
       - name: Verify deployment startup in Docker
         timeout-minutes: 5

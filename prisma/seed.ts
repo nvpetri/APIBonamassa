@@ -100,7 +100,12 @@ export async function seedStore(
   const store = await db.store.upsert({
     where: { slug },
     update: {},
-    create: { slug, name: "Bonamassa Pizzaria", open: input.demo },
+    create: {
+      slug,
+      name: "Bonamassa Pizzaria",
+      open: input.demo,
+      scheduleEnabled: !input.demo,
+    },
   });
   return db.$transaction(
     async (tx) => {

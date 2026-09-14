@@ -222,6 +222,246 @@ test(
       await login("other", other.store.slug, "manager@example.com");
 
       await t.test(
+        "horários, reservas, confirmação antecipada e liberação idempotente",
+        async () => {
+          const initial = (await ok("staff/catalog", "manager")).store;
+          const clock = (offset: number) =>
+            new Intl.DateTimeFormat("en-GB", {
+              timeZone: "America/Sao_Paulo",
+              hour: "2-digit",
+              minute: "2-digit",
+              hourCycle: "h23",
+            }).format(new Date(Date.now() + offset * 60_000));
+          async function settings(
+            patch: Record<string, unknown>,
+            who = "manager",
+          ) {
+            const current = (await ok("staff/catalog", "manager")).store;
+            return api("staff/store", who, "PATCH", {
+              expectedVersion: current.version,
+              name: current.name,
+              deliveryFee: current.deliveryFee,
+              driverFee: current.driverFee,
+              ...patch,
+            });
+          }
+          const configured = await settings({
+            scheduleEnabled: true,
+            opensAt: clock(60),
+            closesAt: clock(180),
+          });
+          assert.equal(configured.status, 200);
+          assert.equal(configured.data.open, false);
+          assert.equal(configured.data.timeZone, "America/Sao_Paulo");
+          assert.equal(
+            (await settings({ open: true }, "attendant")).status,
+            403,
+          );
+          assert.equal(
+            (await settings({ opensAt: "17:00", closesAt: "17:00" })).status,
+            400,
+          );
+          assert.equal((await settings({ opensAt: "25:00" })).status, 400);
+          assert.equal(
+            (await api("orders/quote", "customer", "POST", draft)).data.code,
+            "STORE_CLOSED",
+          );
+          const quoted = await ok("orders/quote", "customer", "POST", {
+            ...draft,
+            allowScheduling: true,
+          });
+          assert.equal(quoted.scheduledFor, configured.data.nextOpening);
+          const key = randomUUID();
+          const reserved = await ok(
+            "orders",
+            "customer",
+            "POST",
+            { quoteId: quoted.quoteId },
+            key,
+          );
+          assert.equal(reserved.status, "SCHEDULED");
+          assert.equal(reserved.scheduledFor, quoted.scheduledFor);
+          assert.equal(
+            (
+              await ok(
+                "orders",
+                "customer",
+                "POST",
+                { quoteId: quoted.quoteId },
+                key,
+              )
+            ).id,
+            reserved.id,
+          );
+          assert.ok(
+            (await ok("staff/orders", "manager")).items.some(
+              (o: any) => o.id === reserved.id,
+            ),
+          );
+          assert.ok(
+            !(await ok("staff/orders", "kitchen")).items.some(
+              (o: any) => o.id === reserved.id,
+            ),
+          );
+          assert.equal(
+            (await api(`staff/orders/${reserved.id}`, "kitchen")).status,
+            404,
+          );
+          assert.equal(
+            (
+              await api(
+                `staff/orders/${reserved.id}/accept`,
+                "manager",
+                "POST",
+                { expectedVersion: reserved.version },
+              )
+            ).status,
+            409,
+          );
+          assert.equal(
+            (await settings({ opensAt: clock(90) })).data.code,
+            "SCHEDULE_HAS_RESERVATIONS",
+          );
+          assert.equal(
+            (await settings({ open: true })).data.code,
+            "EARLY_OPEN_CONFIRMATION_REQUIRED",
+          );
+          assert.equal(
+            (await ok(`orders/${reserved.id}`, "customer")).status,
+            "SCHEDULED",
+          );
+          const toCancel = await order("customer", { allowScheduling: true });
+          assert.equal(
+            (
+              await cmd(toCancel, "cancel", "customer", {
+                reason: "Cancelamento da reserva de teste",
+              })
+            ).status,
+            "CANCELLED",
+          );
+          const pendingQuote = await ok("orders/quote", "customer", "POST", {
+            ...draft,
+            allowScheduling: true,
+          });
+          const opened = await settings({ open: true, confirmEarlyOpen: true });
+          assert.equal(opened.status, 200);
+          assert.equal(opened.data.open, true);
+          assert.ok(opened.data.overrideUntil);
+          const released = await ok(`orders/${reserved.id}`, "customer");
+          assert.equal(released.status, "NEW");
+          assert.equal(released.scheduledFor, reserved.scheduledFor);
+          assert.equal(released.version, reserved.version + 1);
+          await ok("staff/catalog", "manager");
+          const repeated = await ok(`orders/${reserved.id}`, "customer");
+          assert.equal(
+            repeated.events.filter((e: any) => e.action === "schedule-released")
+              .length,
+            1,
+          );
+          assert.equal(
+            (
+              await api("orders", "customer", "POST", {
+                quoteId: pendingQuote.quoteId,
+              })
+            ).data.code,
+            "QUOTE_CHANGED",
+          );
+          await cmd(released, "cancel", "customer", {
+            reason: "Fim do cenário de reserva",
+          });
+          assert.equal(
+            (
+              await settings({
+                scheduleEnabled: false,
+                open: initial.open,
+                opensAt: initial.opensAt,
+                closesAt: initial.closesAt,
+              })
+            ).status,
+            200,
+          );
+        },
+      );
+
+      await t.test(
+        "reservas vencidas recuperam após reinício, sem evento duplicado",
+        async () => {
+          const current = (await ok("staff/catalog", "manager")).store;
+          const clock = (offset: number) =>
+            new Intl.DateTimeFormat("en-GB", {
+              timeZone: "America/Sao_Paulo",
+              hour: "2-digit",
+              minute: "2-digit",
+              hourCycle: "h23",
+            }).format(new Date(Date.now() + offset * 60_000));
+          await ok("staff/store", "manager", "PATCH", {
+            expectedVersion: current.version,
+            name: current.name,
+            deliveryFee: current.deliveryFee,
+            driverFee: current.driverFee,
+            scheduleEnabled: true,
+            opensAt: clock(60),
+            closesAt: clock(180),
+          });
+          const reserved = await order("customer", { allowScheduling: true });
+          // Isolated fixture represents a process that stopped before opening.
+          // No test clock or scheduling override is exposed through HTTP.
+          await app.close();
+          await db.store.update({
+            where: { id: main.store.id },
+            data: { opensAt: clock(-60), closesAt: clock(60), open: false },
+          });
+          await db.order.update({
+            where: { id: reserved.id },
+            data: { scheduledFor: new Date() },
+          });
+          app = await createApp(true);
+          await app.listen(0, "127.0.0.1");
+          base = await app.getUrl();
+          await Promise.all([
+            ok("staff/catalog", "manager"),
+            ok("staff/orders", "kitchen"),
+            ok("me/orders", "customer"),
+          ]);
+          const released = await ok(`orders/${reserved.id}`, "customer");
+          assert.equal(released.status, "NEW");
+          assert.equal(released.version, reserved.version + 1);
+          assert.equal(
+            released.events.filter(
+              (event: any) => event.action === "schedule-released",
+            ).length,
+            1,
+          );
+          assert.ok(released.queuedAt);
+          // Automatic close never cancels or holds an order already released.
+          await db.store.update({
+            where: { id: main.store.id },
+            data: { opensAt: clock(60), closesAt: clock(180) },
+          });
+          assert.equal(
+            (await ok("staff/catalog", "manager")).store.open,
+            false,
+          );
+          assert.equal(
+            (await ok(`orders/${reserved.id}`, "customer")).status,
+            "NEW",
+          );
+          await cmd(released, "cancel", "customer", { reason: "Fim do teste" });
+          const last = (await ok("staff/catalog", "manager")).store;
+          await ok("staff/store", "manager", "PATCH", {
+            expectedVersion: last.version,
+            name: last.name,
+            deliveryFee: last.deliveryFee,
+            driverFee: last.driverFee,
+            scheduleEnabled: false,
+            opensAt: current.opensAt,
+            closesAt: current.closesAt,
+            open: true,
+          });
+        },
+      );
+
+      await t.test(
         "health e OpenAPI; autenticação obrigatória e campos privados ausentes",
         async () => {
           assert.equal((await ok("health")).status, "ok");

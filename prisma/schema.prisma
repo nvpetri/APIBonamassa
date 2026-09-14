@@ -16,6 +16,7 @@ enum Role {
 }
 
 enum OrderStatus {
+  SCHEDULED
   NEW
   CONFIRMED
   PREPARING
@@ -48,6 +49,11 @@ model Store {
   slug          String @unique @db.VarChar(60)
   name          String @db.VarChar(100)
   open          Boolean @default(false)
+  scheduleEnabled Boolean @default(true)
+  opensAt       String @default("17:00") @db.VarChar(5)
+  closesAt      String @default("03:00") @db.VarChar(5)
+  overrideOpen  Boolean?
+  overrideUntil DateTime?
   deliveryFee   Int @default(700)
   driverFee     Int @default(800)
   version       Int @default(1)
@@ -157,6 +163,7 @@ model Order {
   driverId String? @db.Uuid
   driver User? @relation("DriverOrders", fields: [storeId, driverId], references: [storeId, id], onDelete: Restrict)
   status OrderStatus @default(NEW)
+  scheduledFor DateTime?
   deliveryStatus DeliveryStatus?
   version Int @default(1)
   mode String @db.VarChar(20)
@@ -185,6 +192,7 @@ model Order {
   @@unique([storeId, quoteId])
   @@index([storeId, createdAt, id])
   @@index([storeId, status, createdAt, id])
+  @@index([storeId, status, scheduledFor])
   @@index([storeId, driverId, createdAt, id])
   @@index([storeId, customerId, createdAt, id])
 }
@@ -195,7 +203,7 @@ model OrderEvent {
   order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
   version Int
   action String @db.VarChar(40)
-  actorId String @db.Uuid
+  actorId String? @db.Uuid
   data Json
   createdAt DateTime @default(now())
   @@unique([orderId, version])

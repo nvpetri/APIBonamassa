@@ -26,7 +26,7 @@ npm run start:deploy
 
 Esse comando usa o shell do npm dentro do contêiner Linux para executar `db:migrate`, `db:seed` e a API, nessa ordem. Se uma etapa falhar, a API não inicia. Não envolva o comando do campo do Render em aspas ou em outra chamada a `/bin/sh -c`. O campo Pre-Deploy Command pode ficar vazio no plano Free.
 
-Defina no Render `NODE_ENV=production`, `DATABASE_URL` com a conexão direta do Neon completa (incluindo os parâmetros SSL), `SEED_STORE_SLUG=bonamassa`, `SEED_MANAGER_EMAIL`, `SEED_MANAGER_PASSWORD` (12 a 128 caracteres) e `SEED_DEMO=false`. Mantenha as credenciais apenas nas variáveis do serviço. A inicialização não transfere o banco local: em um banco vazio cria uma loja fechada e o gestor. Cardápio, equipe e dados existentes exigem cadastro ou transferência à parte.
+Defina no Render `NODE_ENV=production`, `DATABASE_URL` com a conexão direta do Neon completa (incluindo os parâmetros SSL), `SEED_STORE_SLUG=bonamassa`, `SEED_MANAGER_EMAIL`, `SEED_MANAGER_PASSWORD` (12 a 128 caracteres) e `SEED_DEMO=false`. Mantenha as credenciais apenas nas variáveis do serviço. A inicialização não transfere o banco local: em um banco vazio cria o gestor e uma loja com programação automática diária, das 17h às 03h (São Paulo). O estado aberto/fechado é calculado pela API. Cardápio, equipe e dados existentes exigem cadastro ou transferência à parte.
 
 Defina também `CORS_ORIGINS` explicitamente. Para o painel Next.js que encaminha chamadas pelo servidor e os aplicativos Android nativos, o valor pode ser vazio. Se um frontend no navegador acessar a API diretamente, liste suas origens HTTPS exatas, separadas por vírgula. O Render define `PORT` e a API escuta em `0.0.0.0`.
 
@@ -47,7 +47,7 @@ As chaves de idempotência ficam persistidas sem expiração nesta versão. A re
 - Subtotal dos produtos e total máximo por pedido: 10.000.000 centavos cada. Desconto não amplia esse limite. Taxa de entrega e comissão: até 10.000 centavos cada.
 - Corpo JSON até 256 KB. Foto até 5 MB/16 MP na entrada, WebP até 1 MB ao armazenar. Até 100 MB de fotos por loja.
 - Limitação persistida de requisições por IP; login também limitado por conta/loja. Headers X-Forwarded-For não são confiados por padrão.
-- Sem geocodificação ou validação da região de entrega. Abrir loja é um comando explícito, sem agenda automática.
+- Sem geocodificação ou validação da região de entrega. A loja segue uma agenda diária; ver [Horários e reservas](HORARIOS-E-RESERVAS.md).
 
 ## Processo e manutenção
 

@@ -148,6 +148,7 @@ export const quoteSchema = z
     payment: z.enum(["CASH", "CARD"]),
     cashTendered: cents.nullable(),
     promotionId: uuid.nullable(),
+    allowScheduling: z.boolean().optional(),
     // Apenas atendimento/gestor; no app os dados vêm da sessão.
     customer: customerSchema.optional(),
     channel: z.enum(["WHATSAPP", "COUNTER"]).optional(),
@@ -399,7 +400,18 @@ export const availabilitySchema = actionSchema.extend({
 });
 export const storeSchema = actionSchema.extend({
   name: shortText(100),
-  open: z.boolean(),
+  open: z.boolean().optional(),
+  scheduleEnabled: z.boolean().optional(),
+  opensAt: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .optional(),
+  closesAt: z
+    .string()
+    .regex(/^([01]\d|2[0-3]):[0-5]\d$/)
+    .optional(),
+  confirmEarlyOpen: z.boolean().optional(),
+  resumeSchedule: z.boolean().optional(),
   deliveryFee: cents.max(10000),
   driverFee: cents.max(10000),
 });
@@ -434,6 +446,7 @@ export const changePasswordSchema = z.strictObject({
   newPassword: passwordSchema,
 });
 export const orderStatuses = [
+  "SCHEDULED",
   "NEW",
   "CONFIRMED",
   "PREPARING",
