@@ -39,6 +39,7 @@ export async function createApp(quiet = false) {
     bodyParser: false,
     ...(quiet ? { logger: false as const } : {}),
   });
+  app.getHttpAdapter().getInstance().set("trust proxy", env.trustedProxies.length ? env.trustedProxies : false);
   app.use(
     (
       req: express.Request & { requestId: string },

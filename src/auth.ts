@@ -18,6 +18,7 @@ import { Db, Tx, json, tokenHash } from "./db";
 import { config } from "./config";
 import { ensure, loginSchema, registerSchema, RuleError } from "./domain";
 import { ChangeBus } from "./realtime";
+import { RateLimitError, retryAfterSeconds } from "./rate-limit";
 
 const derive = (password: string, salt: string): Promise<Buffer> =>
   new Promise((resolve, reject) =>
@@ -73,18 +74,14 @@ export class AuthService {
     private readonly bus: ChangeBus,
   ) {}
   async rate(key: string, limit: number, seconds: number) {
-    const rows = await this.db.$queryRaw<{ count: number }[]>`
+    const rows = await this.db.$queryRaw<{ count: number; resetsAt: Date }[]>`
       INSERT INTO "RateBucket" ("key", "count", "resetsAt") VALUES (${tokenHash(key)}, 1, now() + make_interval(secs => ${seconds}))
       ON CONFLICT ("key") DO UPDATE SET
       "count" = CASE WHEN "RateBucket"."resetsAt" <= now() THEN 1 ELSE "RateBucket"."count" + 1 END,
       "resetsAt" = CASE WHEN "RateBucket"."resetsAt" <= now() THEN now() + make_interval(secs => ${seconds}) ELSE "RateBucket"."resetsAt" END
-      RETURNING "count"`;
-    ensure(
-      rows[0].count <= limit,
-      "RATE_LIMITED",
-      "Muitas tentativas. Aguarde antes de tentar novamente.",
-      429,
-    );
+      RETURNING "count", "resetsAt"`;
+    if (rows[0].count > limit)
+      throw new RateLimitError(retryAfterSeconds(rows[0].resetsAt));
   }
   async issue(user: User) {
     const accessToken = randomBytes(32).toString("base64url");
@@ -114,10 +111,13 @@ export class AuthService {
     return this.issue(user);
   }
   async register(input: z.infer<typeof registerSchema>) {
+    ensure(config().CUSTOMER_REGISTRATION_ENABLED === "true", "REGISTRATION_DISABLED", "Novos cadastros estão temporariamente indisponíveis. Entre com sua conta ou fale com a pizzaria.", 503);
     const store = await this.db.store.findUnique({
       where: { slug: input.storeSlug },
     });
     ensure(store, "STORE_NOT_FOUND", "Loja não encontrada.", 404);
+    await this.rate(`register:store:${store.id}`, 30, 3600);
+    await this.rate(`register:email:${store.id}:${input.email}`, 3, 3600);
     const passwordHash = await hashPassword(input.password);
     const user = await this.db.write(store.id, (tx) =>
       tx.user.create({
@@ -246,14 +246,14 @@ export class AccessGuard implements CanActivate {
       ctx.getHandler(),
       ctx.getClass(),
     ]);
-    // Express does not trust X-Forwarded-For by default. Never accept client-supplied IPs.
-    const sensitive = /^\/v1\/(sessions|customers)$/.test(req.path);
-    await this.auth.rate(
-      `http:${sensitive ? "auth" : "general"}:${req.ip}`,
-      sensitive ? 60 : 600,
-      60,
-    );
-    if (isPublic) return true;
+    // Only explicitly trusted proxies affect req.ip. Never read XFF directly.
+    // A coarse edge ceiling still bounds authentication/DB work.
+    await this.auth.rate(`http:edge:${req.ip}`, 6000, 60);
+    if (isPublic) {
+      const sensitive = /^\/v1\/(sessions|customers)$/.test(req.path);
+      await this.auth.rate(`http:${sensitive ? "auth" : "anonymous"}:${req.ip}`, sensitive ? 60 : 600, 60);
+      return true;
+    }
     const header = req.headers.authorization;
     if (!header?.startsWith("Bearer "))
       throw new RuleError(
@@ -262,6 +262,9 @@ export class AccessGuard implements CanActivate {
         401,
       );
     req.actor = await this.auth.authenticate(header.slice(7));
+    // Separate authenticated staff/customers even behind the same BFF/NAT.
+    // Using user identity instead of token prevents bypass by creating sessions.
+    await this.auth.rate(`http:user:${req.actor.storeId}:${req.actor.id}`, 600, 60);
     const roles = this.reflector.getAllAndOverride<Role[]>("roles", [
       ctx.getHandler(),
       ctx.getClass(),

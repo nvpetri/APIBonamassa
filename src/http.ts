@@ -12,6 +12,7 @@ import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 import { RuleError } from "./domain";
+import { RateLimitError } from "./rate-limit";
 
 export const BodyDoc = (schema: z.ZodType) =>
   ApiBody({
@@ -107,7 +108,7 @@ export class Errors implements ExceptionFilter {
         code,
         errorType: error instanceof Error ? error.name : "Unknown",
       });
-    if (status === 429) res.setHeader("Retry-After", "900");
+    if (status === 429) res.setHeader("Retry-After", String(error instanceof RateLimitError ? error.retryAfterSeconds : 60));
     res.status(status).json({
       code,
       message,
