@@ -23,6 +23,7 @@ Os endereços terminados em `.example`, usuários e valores vazios são **marcad
 - API: validação de ambiente, TLS do PostgreSQL com certificado verificado, documentação pública/demo desativados em staging/produção.
 - Proxy: confiança somente em IPs/CIDRs explícitos, com teste contra X-Forwarded-For forjado. A topologia real do Render ainda precisa ser confirmada.
 - Limites: usuário autenticado separado dos demais usuários atrás do mesmo painel/NAT; teto geral por IP mantido; Retry-After corresponde à janela real.
+- Senhas: formato scrypt v2 com custo maior e atualização automática dos hashes legados após login válido.
 - Cadastro: opção de suspender novas contas; limites adicionais por loja/e-mail antes do cálculo da senha.
 - Painel: validação de HTTPS, cookie seguro, segredo de sessão e origem fixa; proteção contra enquadramento em outro site e políticas estruturais de navegador.
 - Androids: tarefa obrigatória de configuração release, recusa de HTTP e flags demo/integração; compilação release sem assinatura de produção na CI.

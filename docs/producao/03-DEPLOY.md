@@ -26,13 +26,13 @@ Migrações com credencial separada podem ser executadas por um operador ou job 
 
 Criar um Web Service Docker de homologação, vinculado ao commit/branch aprovado. Região próxima do banco, recursos que não durmam para o ensaio operacional.
 
-| Campo | Valor |
-| --- | --- |
-| Docker Build Context | . |
-| Dockerfile Path | ./Dockerfile |
-| Docker Command | npm run start:production |
-| Health Check Path | /v1/health |
-| Variáveis | Capítulo 2, APP_ENV=staging |
+| Campo                | Valor                       |
+| -------------------- | --------------------------- |
+| Docker Build Context | .                           |
+| Dockerfile Path      | ./Dockerfile                |
+| Docker Command       | npm run start:production    |
+| Health Check Path    | /v1/health                  |
+| Variáveis            | Capítulo 2, APP_ENV=staging |
 
 **Migração não é compilação.** npm run build compila TypeScript e gera Prisma Client; não cria as tabelas.
 
@@ -70,13 +70,13 @@ As migrações de horários ativam 17h–03h em lojas existentes. Não migrar nu
 
 Criar Web Service **Node**, não Static Site. Configurar as variáveis do capítulo 2, usando API de homologação.
 
-| Campo | Valor |
-| --- | --- |
-| Root Directory | Vazio (raiz do repositório) |
-| Build Command | npm ci && npm run build |
-| Start Command | npm run start:production |
-| Health Check Path | / |
-| Runtime Node | Respeitar .nvmrc do repositório |
+| Campo             | Valor                           |
+| ----------------- | ------------------------------- |
+| Root Directory    | Vazio (raiz do repositório)     |
+| Build Command     | npm ci && npm run build         |
+| Start Command     | npm run start:production        |
+| Health Check Path | /                               |
+| Runtime Node      | Respeitar .nvmrc do repositório |
 
 O check do painel valida a configuração; / apenas comprova que o painel respondeu. **Não comprova que o login ou o banco estão funcionando.** Testar o login e uma operação controlada na homologação.
 
@@ -100,7 +100,7 @@ Depois do piloto, ativar deploy automático somente se o processo de aprovação
 
 Se o problema é código e a versão anterior aceita o esquema/dados atuais, voltar ao deploy/commit aprovado e testar o fluxo. Verificar também os valores de ambiente e comandos que o provedor reaplica. [Rollback no Render](https://render.com/docs/rollbacks).
 
-Não voltar para uma API que desconhece SCHEDULED quando já existem reservas, nem instalar APK antigo que não interpreta o contrato atual. É necessário avaliar compatibilidade, não só escolher o deploy verde anterior.
+Não voltar para uma API que desconhece o hash scrypt v2 depois que contas tiverem sido atualizadas: ela não conseguirá autenticar essas senhas. Também não voltar para uma API que desconhece SCHEDULED quando já existem reservas, nem instalar APK antigo que não interpreta o contrato atual. É necessário avaliar compatibilidade, não só escolher o deploy verde anterior.
 
 **Rollback de código não desfaz uma migração ou um pedido.** Preferir correção aditiva (“roll forward”) para banco. Restaurar banco pode perder pedidos posteriores ao ponto recuperado e não desfaz entregas/pagamentos ocorridos no mundo real. Seguir capítulo 4, reconciliar com a pizzaria e aprovar a decisão.
 

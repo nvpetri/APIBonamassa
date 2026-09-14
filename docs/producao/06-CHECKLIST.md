@@ -66,20 +66,20 @@ Uma caixa marcada precisa de data, responsável e evidência. Este documento com
 
 ## Registro da versão candidata
 
-| Campo | Valor/evidência |
-| --- | --- |
-| Data e responsáveis | |
-| Commit API / run CI | |
-| Commit painel / run CI | |
-| Commit Android cliente / run CI | |
-| Commit Android entregador / run CI | |
-| Ambiente/banco, sem credenciais | |
-| Domínios | |
-| Migration mais recente | |
-| Versões e certificados dos APKs | |
-| Resultado restore/carga/revisão de segurança | |
-| Pendências aceitas e prazo | |
-| Decisão: não liberar / piloto / lançamento aberto | |
+| Campo                                             | Valor/evidência |
+| ------------------------------------------------- | --------------- |
+| Data e responsáveis                               |                 |
+| Commit API / run CI                               |                 |
+| Commit painel / run CI                            |                 |
+| Commit Android cliente / run CI                   |                 |
+| Commit Android entregador / run CI                |                 |
+| Ambiente/banco, sem credenciais                   |                 |
+| Domínios                                          |                 |
+| Migration mais recente                            |                 |
+| Versões e certificados dos APKs                   |                 |
+| Resultado restore/carga/revisão de segurança      |                 |
+| Pendências aceitas e prazo                        |                 |
+| Decisão: não liberar / piloto / lançamento aberto |                 |
 
 ## Como repetir as verificações de código
 

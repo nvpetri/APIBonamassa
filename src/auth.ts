@@ -16,7 +16,12 @@ import { ensure, loginSchema, registerSchema, RuleError } from "./domain";
 import { ChangeBus } from "./realtime";
 import { RateLimitError, retryAfterSeconds } from "./rate-limit";
 
-import { dummyPasswordHash, hashPassword, needsPasswordUpgrade, verifyPassword } from "./password";
+import {
+  dummyPasswordHash,
+  hashPassword,
+  needsPasswordUpgrade,
+  verifyPassword,
+} from "./password";
 export { hashPassword } from "./password";
 
 export type Actor = Pick<
@@ -75,22 +80,42 @@ export class AuthService {
       (await this.db.user.findUnique({
         where: { storeId_email: { storeId: store.id, email: input.email } },
       }));
-    const valid = await verifyPassword(input.password, user?.passwordHash ?? dummyPasswordHash);
+    const valid = await verifyPassword(
+      input.password,
+      user?.passwordHash ?? dummyPasswordHash,
+    );
     ensure(
       user?.enabled && valid,
       "INVALID_CREDENTIALS",
       "E-mail ou senha inválidos.",
       401,
     );
-    const upgradedHash = needsPasswordUpgrade(user.passwordHash) ? await hashPassword(input.password) : null;
+    const upgradedHash = needsPasswordUpgrade(user.passwordHash)
+      ? await hashPassword(input.password)
+      : null;
     return this.db.write(user.storeId, async (tx) => {
-      const current = await tx.user.findUniqueOrThrow({ where: { id: user.id } });
-      ensure(current.enabled && current.passwordHash === user.passwordHash,
-        "INVALID_CREDENTIALS", "E-mail ou senha inválidos.", 401);
+      const current = await tx.user.findUniqueOrThrow({
+        where: { id: user.id },
+      });
+      ensure(
+        current.enabled && current.passwordHash === user.passwordHash,
+        "INVALID_CREDENTIALS",
+        "E-mail ou senha inválidos.",
+        401,
+      );
       if (upgradedHash) {
-        await tx.user.update({ where: { id: current.id }, data: { passwordHash: upgradedHash } });
-        await tx.audit.create({ data: { storeId: current.storeId, actorId: current.id,
-          action: "user.password.rehashed", data: json({ userId: current.id }) } });
+        await tx.user.update({
+          where: { id: current.id },
+          data: { passwordHash: upgradedHash },
+        });
+        await tx.audit.create({
+          data: {
+            storeId: current.storeId,
+            actorId: current.id,
+            action: "user.password.rehashed",
+            data: json({ userId: current.id }),
+          },
+        });
       }
       return this.issue(current, tx);
     });

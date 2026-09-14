@@ -1276,27 +1276,75 @@ test(
         },
       );
 
-      await t.test("login atualiza hash legado sem mudar senha ou permitir conta desativada", async () => {
-        const salt = "2".repeat(32);
-        const key = await new Promise<Buffer>((resolve, reject) =>
-          scrypt(password, salt, 64, { N: 32768, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
-            (e, k) => e ? reject(e) : resolve(k)));
-        const legacy = `scrypt${salt}${key.toString("hex")}`;
-        const account = await db.user.create({ data: { storeId: main.store.id,
-          name: "Legado teste", email: "legacy@example.com", phone: "5511999999999",
-          role: "KITCHEN", passwordHash: legacy } });
-        await login("legacy");
-        const updated = await db.user.findUniqueOrThrow({ where: { id: account.id } });
-        assert.ok(updated.passwordHash.startsWith("scrypt$v2$"));
-        assert.equal(updated.role, account.role);
-        assert.equal((await api("me", "legacy")).status, 200);
-        assert.equal(await db.audit.count({ where: { storeId: main.store.id, actorId: account.id, action: "user.password.rehashed" } }), 1);
-        await login("legacy");
-        assert.equal(await db.audit.count({ where: { storeId: main.store.id, actorId: account.id, action: "user.password.rehashed" } }), 1);
-        await db.user.update({ where: { id: account.id }, data: { enabled: false } });
-        assert.equal((await api("me", "legacy")).status, 401);
-        assert.equal((await api("sessions", undefined, "POST", { storeSlug: slug, email: account.email, password })).status, 401);
-      });
+      await t.test(
+        "login atualiza hash legado sem mudar senha ou permitir conta desativada",
+        async () => {
+          const salt = "2".repeat(32);
+          const key = await new Promise<Buffer>((resolve, reject) =>
+            scrypt(
+              password,
+              salt,
+              64,
+              { N: 32768, r: 8, p: 1, maxmem: 128 * 1024 * 1024 },
+              (e, k) => (e ? reject(e) : resolve(k)),
+            ),
+          );
+          const legacy = `scrypt${salt}${key.toString("hex")}`;
+          const account = await db.user.create({
+            data: {
+              storeId: main.store.id,
+              name: "Legado teste",
+              email: "legacy@example.com",
+              phone: "5511999999999",
+              role: "KITCHEN",
+              passwordHash: legacy,
+            },
+          });
+          await login("legacy");
+          const updated = await db.user.findUniqueOrThrow({
+            where: { id: account.id },
+          });
+          assert.ok(updated.passwordHash.startsWith("scrypt$v2$"));
+          assert.equal(updated.role, account.role);
+          assert.equal((await api("me", "legacy")).status, 200);
+          assert.equal(
+            await db.audit.count({
+              where: {
+                storeId: main.store.id,
+                actorId: account.id,
+                action: "user.password.rehashed",
+              },
+            }),
+            1,
+          );
+          await login("legacy");
+          assert.equal(
+            await db.audit.count({
+              where: {
+                storeId: main.store.id,
+                actorId: account.id,
+                action: "user.password.rehashed",
+              },
+            }),
+            1,
+          );
+          await db.user.update({
+            where: { id: account.id },
+            data: { enabled: false },
+          });
+          assert.equal((await api("me", "legacy")).status, 401);
+          assert.equal(
+            (
+              await api("sessions", undefined, "POST", {
+                storeSlug: slug,
+                email: account.email,
+                password,
+              })
+            ).status,
+            401,
+          );
+        },
+      );
       await t.test(
         "limitação de login é persistida e erro não revela existência da conta",
         async () => {

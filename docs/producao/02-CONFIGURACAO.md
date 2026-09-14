@@ -12,18 +12,18 @@ Os modelos [.env.production.example](../../.env.production.example) da API e do 
 
 ## API
 
-| Variável | Produção | Por quê |
-| --- | --- | --- |
-| NODE_ENV | production | Runtime de produção |
-| APP_ENV | production; staging no ambiente de ensaio | Ativa verificações |
-| DATABASE_URL | URL PostgreSQL própria deste ambiente | Acesso ao banco |
-| CORS_ORIGINS | Vazio no desenho atual com BFF + Android | Não abrir acesso de navegador indiscriminadamente |
-| DOCS_ENABLED | false | Não expor documentação interativa |
-| SESSION_HOURS | 12, ou prazo menor aprovado | Expiração das sessões |
-| SEED_DEMO | false | Não inserir cardápio/abertura de demonstração |
-| CUSTOMER_REGISTRATION_ENABLED | false no piloto restrito, após cadastrar os participantes | Suspender novas contas sem revogar as existentes |
-| TRUSTED_PROXY_CIDRS | Somente proxies cuja topologia foi validada | Não confiar em IP enviado pelo cliente |
-| PORT | Variável fornecida pelo Render | API escuta em 0.0.0.0 |
+| Variável                      | Produção                                                  | Por quê                                           |
+| ----------------------------- | --------------------------------------------------------- | ------------------------------------------------- |
+| NODE_ENV                      | production                                                | Runtime de produção                               |
+| APP_ENV                       | production; staging no ambiente de ensaio                 | Ativa verificações                                |
+| DATABASE_URL                  | URL PostgreSQL própria deste ambiente                     | Acesso ao banco                                   |
+| CORS_ORIGINS                  | Vazio no desenho atual com BFF + Android                  | Não abrir acesso de navegador indiscriminadamente |
+| DOCS_ENABLED                  | false                                                     | Não expor documentação interativa                 |
+| SESSION_HOURS                 | 12, ou prazo menor aprovado                               | Expiração das sessões                             |
+| SEED_DEMO                     | false                                                     | Não inserir cardápio/abertura de demonstração     |
+| CUSTOMER_REGISTRATION_ENABLED | false no piloto restrito, após cadastrar os participantes | Suspender novas contas sem revogar as existentes  |
+| TRUSTED_PROXY_CIDRS           | Somente proxies cuja topologia foi validada               | Não confiar em IP enviado pelo cliente            |
+| PORT                          | Variável fornecida pelo Render                            | API escuta em 0.0.0.0                             |
 
 A conexão Prisma/PostgreSQL deve conter **uma ocorrência** de sslmode=require e sslaccept=strict. Exemplo de formato, sem credenciais reais:
 
@@ -39,17 +39,17 @@ Comece com a conexão direta do Neon para migrações. Se usar pooling no runtim
 
 ## Painel
 
-| Variável | Valor |
-| --- | --- |
-| NODE_ENV | production |
-| APP_ENV | production ou staging |
-| PANEL_MODE | api |
-| API_URL | Origem HTTPS da API, sem /v1, usuário, query ou fragmento |
-| PANEL_ORIGIN | Origem HTTPS exata em que a equipe acessará o painel |
-| STORE_SLUG | bonamassa, ou a unidade realmente cadastrada |
-| COOKIE_SECURE | true |
-| SESSION_SECRET | 32 bytes aleatórios em hexadecimal: 64 caracteres |
-| PORT | Fornecida pelo Render |
+| Variável       | Valor                                                     |
+| -------------- | --------------------------------------------------------- |
+| NODE_ENV       | production                                                |
+| APP_ENV        | production ou staging                                     |
+| PANEL_MODE     | api                                                       |
+| API_URL        | Origem HTTPS da API, sem /v1, usuário, query ou fragmento |
+| PANEL_ORIGIN   | Origem HTTPS exata em que a equipe acessará o painel      |
+| STORE_SLUG     | bonamassa, ou a unidade realmente cadastrada              |
+| COOKIE_SECURE  | true                                                      |
+| SESSION_SECRET | 32 bytes aleatórios em hexadecimal: 64 caracteres         |
+| PORT           | Fornecida pelo Render                                     |
 
 Gerar o segredo **no seu computador**, não aqui, em um terminal privado:
 

@@ -19,11 +19,11 @@ O painel é **Next.js com execução no servidor**, não um Static Site: login e
 
 ## Separação mínima
 
-| Ambiente | Finalidade | Dados | Acesso |
-| --- | --- | --- | --- |
-| Local/teste | Desenvolver e executar CI | Dados fictícios, banco descartável | Desenvolvedor/CI |
-| Homologação (staging) | Ensaiar a versão antes do lançamento | Fictícios, contas específicas | Equipe de teste |
-| Produção | Operar pedidos reais | Clientes, pedidos e equipe reais | Somente autorizados |
+| Ambiente              | Finalidade                           | Dados                              | Acesso              |
+| --------------------- | ------------------------------------ | ---------------------------------- | ------------------- |
+| Local/teste           | Desenvolver e executar CI            | Dados fictícios, banco descartável | Desenvolvedor/CI    |
+| Homologação (staging) | Ensaiar a versão antes do lançamento | Fictícios, contas específicas      | Equipe de teste     |
+| Produção              | Operar pedidos reais                 | Clientes, pedidos e equipe reais   | Somente autorizados |
 
 Cada ambiente deve ter banco, credenciais, URLs e segredo de sessão próprios. Prefira projetos separados no Neon para reduzir confusão. Uma branch criada a partir de produção pode conter **todos os dados pessoais de produção**: não é automaticamente uma base segura para testes.
 
@@ -39,15 +39,15 @@ Escolha API e banco em regiões próximas quando possível. Confirme as regiões
 
 ## Decisões que precisam ficar registradas
 
-| Decisão | Sugestão inicial | Quem confirma |
-| --- | --- | --- |
-| Propriedade de domínio/nuvem | Conta da pizzaria, desenvolvedor como colaborador | Pizzaria |
-| API definitiva | api.seu-dominio.example ou origem HTTPS estável do Render | Ambos |
-| Painel definitivo | painel.seu-dominio.example | Ambos |
-| Distribuição dos Androids | Piloto restrito; decidir APK direto ou Google Play | Pizzaria |
-| Dados e retenção | Política explícita, coleta mínima | Pizzaria + assessoria |
-| Suporte | Horários, canal, incidentes e mudanças incluídas | Contrato |
-| Recuperação | Meta inicial proposta: RPO 15 min / RTO 60 min | Validar com ensaio e orçamento |
+| Decisão                      | Sugestão inicial                                          | Quem confirma                  |
+| ---------------------------- | --------------------------------------------------------- | ------------------------------ |
+| Propriedade de domínio/nuvem | Conta da pizzaria, desenvolvedor como colaborador         | Pizzaria                       |
+| API definitiva               | api.seu-dominio.example ou origem HTTPS estável do Render | Ambos                          |
+| Painel definitivo            | painel.seu-dominio.example                                | Ambos                          |
+| Distribuição dos Androids    | Piloto restrito; decidir APK direto ou Google Play        | Pizzaria                       |
+| Dados e retenção             | Política explícita, coleta mínima                         | Pizzaria + assessoria          |
+| Suporte                      | Horários, canal, incidentes e mudanças incluídas          | Contrato                       |
+| Recuperação                  | Meta inicial proposta: RPO 15 min / RTO 60 min            | Validar com ensaio e orçamento |
 
 RPO é quanto dado se admite perder após falha. RTO é quanto tempo se admite ficar indisponível. Esses números são **metas para discutir**, não garantias do código ou do plano contratado.
 
@@ -56,3 +56,7 @@ RPO é quanto dado se admite perder após falha. RTO é quanto tempo se admite f
 API, painel, banco/armazenamento/retensão de backups, tráfego, domínio anual, monitoramento, suporte e eventual conta de loja de aplicativos. E-mail/SMS/WhatsApp, gateway de pagamentos e fiscal são integrações separadas quando adotadas.
 
 Não prometer preço mensal fixo de nuvem sem conferir a cotação do plano, limites e moeda. Separar no contrato custo de infraestrutura, manutenção corretiva, plantão e novas funcionalidades.
+
+## Antes de escalar horizontalmente
+
+Começar com uma instância da API. O barramento de eventos/Socket.IO atual é local ao processo; transações no banco não distribuem notificações entre servidores. Antes de adicionar instâncias, planejar distribuição de eventos/revogação, conexões do banco e testar reconexão/atualização dos clientes. Não contratar múltiplas réplicas presumindo que isso já está resolvido.

@@ -63,16 +63,16 @@ Depois de restaurar, conferir pedidos recebidos/entregues/pagos após o ponto re
 
 ## Registro mínimo do ensaio
 
-| Campo | Preencher |
-| --- | --- |
-| Data/responsável | |
-| Backup e ponto no tempo | |
-| Banco de destino isolado | |
-| Commit/schema usados | |
-| Tempo até recuperação validada | |
-| Pedidos/imagens/reservas conferidos | |
-| Perda observada e reconciliação | |
-| Problemas e correções | |
-| Próximo ensaio | |
+| Campo                               | Preencher |
+| ----------------------------------- | --------- |
+| Data/responsável                    |           |
+| Backup e ponto no tempo             |           |
+| Banco de destino isolado            |           |
+| Commit/schema usados                |           |
+| Tempo até recuperação validada      |           |
+| Pedidos/imagens/reservas conferidos |           |
+| Perda observada e reconciliação     |           |
+| Problemas e correções               |           |
+| Próximo ensaio                      |           |
 
 Ensaiar antes do lançamento, após mudanças relevantes e periodicamente conforme o risco. Não marcar este capítulo como aprovado só porque a documentação existe.

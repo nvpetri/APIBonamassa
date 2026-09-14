@@ -17,19 +17,19 @@ CORS não é autenticação. HTTPS não impede pedido falso. Criptografia não c
 
 ## Bloqueadores e decisões antes de exposição pública
 
-| Item | Situação desta preparação | Próximo passo |
-| --- | --- | --- |
-| Verificação de e-mail/telefone | Não implementada | Escolher fluxo/provedor, comprovar posse e controlar reenvios/recuperação |
-| MFA do gerente | Não implementado no produto | Definir MFA e/ou acesso administrativo restrito, com ameaça residual registrada |
-| Recuperação de senha | Sem autosserviço verificado | Procedimento assistido seguro; implementar fluxo de recuperação auditável |
-| Topologia de proxy do Render | Código preparado; nuvem não conferida | Ensaiar rede, spoofing e limites; não inventar CIDRs |
-| Banco com menor privilégio | Depende do provedor | Separar runtime/migração, testar permissões |
-| Backups/RPO/RTO | Runbook pronto; restore não realizado | Executar e guardar evidências privadas |
-| Reserva/pedido falso | Cotas ajudam, não provam identidade | Política de confirmação, contato verificado e monitoramento |
-| Manutenção sem novos pedidos | Sem botão global completo | Preparar bloqueio controlado e evolução específica |
-| Monitoramento/plantão | Roteiro preparado, nenhum alerta criado | Escolher canal, responsáveis, limites e escalonamento |
-| Teste de carga/pentest | Não realizados | Executar escopo autorizado em homologação; corrigir achados |
-| Assinatura/distribuição release | Compilação preparada | Chaves, instalação real e canal de distribuição aprovados |
+| Item                            | Situação desta preparação               | Próximo passo                                                                   |
+| ------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------- |
+| Verificação de e-mail/telefone  | Não implementada                        | Escolher fluxo/provedor, comprovar posse e controlar reenvios/recuperação       |
+| MFA do gerente                  | Não implementado no produto             | Definir MFA e/ou acesso administrativo restrito, com ameaça residual registrada |
+| Recuperação de senha            | Sem autosserviço verificado             | Procedimento assistido seguro; implementar fluxo de recuperação auditável       |
+| Topologia de proxy do Render    | Código preparado; nuvem não conferida   | Ensaiar rede, spoofing e limites; não inventar CIDRs                            |
+| Banco com menor privilégio      | Depende do provedor                     | Separar runtime/migração, testar permissões                                     |
+| Backups/RPO/RTO                 | Runbook pronto; restore não realizado   | Executar e guardar evidências privadas                                          |
+| Reserva/pedido falso            | Cotas ajudam, não provam identidade     | Política de confirmação, contato verificado e monitoramento                     |
+| Manutenção sem novos pedidos    | Sem botão global completo               | Preparar bloqueio controlado e evolução específica                              |
+| Monitoramento/plantão           | Roteiro preparado, nenhum alerta criado | Escolher canal, responsáveis, limites e escalonamento                           |
+| Teste de carga/pentest          | Não realizados                          | Executar escopo autorizado em homologação; corrigir achados                     |
+| Assinatura/distribuição release | Compilação preparada                    | Chaves, instalação real e canal de distribuição aprovados                       |
 
 Não declarar conformidade ASVS, LGPD, PCI ou segurança “100%”. O objetivo é uma avaliação verificável de riscos e controles. A revisão deve incluir autorização por objeto, fluxos de negócio e abuso, não somente scanner de dependências. [OWASP API Security](https://owasp.org/www-project-api-security/).
 
@@ -57,11 +57,11 @@ No fechamento: conferir pedidos em andamento, entregas/retornos, pagamentos e re
 
 Separar três sinais:
 
-| Sinal | Exemplo de verificação | O que não comprova |
-| --- | --- | --- |
-| Técnico | GET /v1/health e painel / respondem | Pedido completo funcionando |
-| Operacional | Reservas liberadas na abertura, fila sem atrasos inexplicados | Infraestrutura livre de falhas |
-| Recuperação | Backup recente e restore ensaiado | Ausência de perda desde o backup |
+| Sinal       | Exemplo de verificação                                        | O que não comprova               |
+| ----------- | ------------------------------------------------------------- | -------------------------------- |
+| Técnico     | GET /v1/health e painel / respondem                           | Pedido completo funcionando      |
+| Operacional | Reservas liberadas na abertura, fila sem atrasos inexplicados | Infraestrutura livre de falhas   |
+| Recuperação | Backup recente e restore ensaiado                             | Ausência de perda desde o backup |
 
 A API /v1/health consulta o banco. A resposta 200 é útil para disponibilidade, mas não testa todos os papéis, preços ou entrega.
 
@@ -87,14 +87,14 @@ Usar job/cron operacional separado quando contratado e configurado; a existênci
 
 ## Rotação de segredos
 
-| Segredo/acesso | Efeito e cuidado |
-| --- | --- |
-| SESSION_SECRET | Troca invalida cookies do painel; avisar equipe e testar novo login |
-| Senha do banco | Coordenar nova credencial com API/job; testar antes de revogar a anterior |
-| Senha da equipe | Troca ou desativação deve invalidar acessos; testar usuário revogado |
-| Token/sessão comprometido | Revogar sessão/conta e investigar origem |
+| Segredo/acesso              | Efeito e cuidado                                                          |
+| --------------------------- | ------------------------------------------------------------------------- |
+| SESSION_SECRET              | Troca invalida cookies do painel; avisar equipe e testar novo login       |
+| Senha do banco              | Coordenar nova credencial com API/job; testar antes de revogar a anterior |
+| Senha da equipe             | Troca ou desativação deve invalidar acessos; testar usuário revogado      |
+| Token/sessão comprometido   | Revogar sessão/conta e investigar origem                                  |
 | Chave de assinatura Android | Não trocar arbitrariamente: preservar capacidade de atualizar aplicativos |
-| Conta de provedor | MFA, recuperação e revisão dos colaboradores |
+| Conta de provedor           | MFA, recuperação e revisão dos colaboradores                              |
 
 Guardar segredos em cofre. Não enviar por issue, PR, planilha pública ou chat. Senha no histórico Git deve ser revogada; apagar só a linha do arquivo não resolve o vazamento.
 
