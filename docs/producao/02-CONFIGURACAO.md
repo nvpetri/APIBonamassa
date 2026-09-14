@@ -71,6 +71,8 @@ Confirme com o provedor quais caminhos chegam ao processo, quem insere/remove he
 
 Na homologação, teste duas origens de rede (Wi-Fi e rede móvel), usuário autenticado, navegador através do BFF, IPv4/IPv6 e X-Forwarded-For deliberadamente falso. A documentação oficial explica por que confiar no primeiro valor do header é inseguro. [Express atrás de proxies](https://expressjs.com/en/guide/behind-proxies.html).
 
+A configuração de proxy desta etapa é aplicada ao HTTP/Express. Socket.IO ainda limita handshakes pelo endereço observado no socket (30/min), que pode ser compartilhado atrás de um gateway. Validar isso separadamente antes de aumentar conexões; não considerar o teste de XFF do Express como validação do WebSocket.
+
 O painel **não repassa X-Forwarded-For do navegador**. Seus acessos anônimos compartilham o IP de saída do BFF. Os autenticados são limitados por usuário, além do teto do IP. A checagem em CI valida a lógica local, não a topologia hospedada.
 
 Limites atuais: teto de 6.000/min por IP, anônimo 600/min, rotas de login/cadastro 60/min por IP, autenticado 600/min por usuário, login 10/15 min por loja/e-mail, cadastro 30/h por loja e 3/h por e-mail. São barreiras iniciais a medir, não proteção DDoS. Um atacante ainda pode consumir cota de cadastro de uma loja.

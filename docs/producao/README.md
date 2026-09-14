@@ -15,6 +15,7 @@ Leia na ordem. Cada capítulo explica o motivo, o procedimento e como conferir o
 5. [Operação, incidentes e segurança](05-OPERACAO-SEGURANCA.md).
 6. [Checklist de liberação e registro de evidências](06-CHECKLIST.md).
 7. [Assinatura e publicação do cliente Android](https://github.com/nvpetri/BonamassaAndroid/blob/codex/preparacao-producao/docs/PRODUCAO.md) e [entregador Android](https://github.com/nvpetri/BonamassaEntregador/blob/codex/preparacao-producao/docs/PRODUCAO.md).
+8. [Evidências das verificações de código](07-VALIDACAO.md).
 
 Os endereços terminados em `.example`, usuários e valores vazios são **marcadores**. Não são recursos criados ou credenciais utilizáveis.
 
