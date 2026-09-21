@@ -7,6 +7,11 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum VerificationPurpose {
+  EMAIL_VERIFY
+  PASSWORD_RESET
+}
+
 enum Role {
   MANAGER
   ATTENDANT
@@ -79,13 +84,29 @@ model User {
   available    Boolean @default(true)
   version      Int @default(1)
   createdAt    DateTime @default(now())
+  emailVerifiedAt DateTime?
   sessions     Session[]
+  verificationCodes VerificationCode[]
   quotes       Quote[]
   customerOrders Order[] @relation("CustomerOrders")
   driverOrders   Order[] @relation("DriverOrders")
   idempotencies Idempotency[]
   @@unique([storeId, email])
   @@unique([storeId, id])
+}
+
+model VerificationCode {
+  id        String @id @default(uuid()) @db.Uuid
+  userId    String @db.Uuid
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  purpose   VerificationPurpose
+  codeHash  String @db.Char(64)
+  expiresAt DateTime
+  consumedAt DateTime?
+  attempts  Int @default(0)
+  createdAt DateTime @default(now())
+  @@index([userId, purpose, createdAt])
+  @@index([expiresAt])
 }
 
 model Session {
