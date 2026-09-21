@@ -749,7 +749,13 @@ test(
             name: "Teste",
             phone: "5500000000000",
           });
-          assert.equal(account.user.role, "CUSTOMER");
+          assert.equal(account.verificationRequired, true);
+          assert.equal(account.email, "new@example.com");
+          const registered = await db.user.findUniqueOrThrow({
+            where: { storeId_email: { storeId: main.store.id, email: "new@example.com" } },
+          });
+          assert.equal(registered.role, "CUSTOMER");
+          assert.equal(registered.emailVerifiedAt, null);
           assert.equal(
             (
               await api("orders/quote", "customer", "POST", {
@@ -1553,6 +1559,7 @@ test(
               phone: "5511999999999",
               role: "KITCHEN",
               passwordHash: legacy,
+              emailVerifiedAt: new Date(),
             },
           });
           await login("legacy");
