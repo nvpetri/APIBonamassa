@@ -202,12 +202,7 @@ export class AuthService {
   async confirmEmail(storeSlug: string, email: string, code: string) {
     await this.rate(`verify-confirm:${storeSlug}:${email}`, 10, 900);
     const user = await this.userByEmail(storeSlug, email);
-    ensure(
-      user?.enabled,
-      "INVALID_CODE",
-      "Código inválido ou expirado.",
-      400,
-    );
+    ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
     if (user.emailVerifiedAt) return this.issue(user);
     const record = await this.db.verificationCode.findFirst({
       where: {
@@ -256,12 +251,7 @@ export class AuthService {
   ) {
     await this.rate(`reset-confirm:${storeSlug}:${email}`, 10, 900);
     const user = await this.userByEmail(storeSlug, email);
-    ensure(
-      user?.enabled,
-      "INVALID_CODE",
-      "Código inválido ou expirado.",
-      400,
-    );
+    ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
     const record = await this.db.verificationCode.findFirst({
       where: {
         userId: user.id,
@@ -297,7 +287,10 @@ export class AuthService {
           version: { increment: 1 },
         },
       });
-      await tx.verificationCode.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
+      await tx.verificationCode.update({
+        where: { id: record.id },
+        data: { consumedAt: new Date() },
+      });
       await tx.session.deleteMany({ where: { userId: user.id } });
       await tx.audit.create({
         data: {
