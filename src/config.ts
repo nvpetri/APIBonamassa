@@ -15,9 +15,17 @@ export function config(env: NodeJS.ProcessEnv = process.env) {
       SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
       CUSTOMER_REGISTRATION_ENABLED: z.enum(["true", "false"]).default("true"),
       EMAIL_API_KEY: z.string().min(1).optional(),
-      EMAIL_FROM: z\n        .string()\n        .min(3)\n        .default("Bonamassa <onboarding@resend.dev>"),
+      EMAIL_FROM: z
+        .string()
+        .min(3)
+        .default("Bonamassa <onboarding@resend.dev>"),
       EMAIL_API_URL: z.string().url().default("https://api.resend.com/emails"),
-      VERIFICATION_CODE_MINUTES: z.coerce\n        .number()\n        .int()\n        .min(5)\n        .max(30)\n        .default(10),
+      VERIFICATION_CODE_MINUTES: z.coerce
+        .number()
+        .int()
+        .min(5)
+        .max(30)
+        .default(10),
     })
     .parse(env);
   const origins = e.CORS_ORIGINS.split(",")
