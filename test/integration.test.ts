@@ -217,6 +217,7 @@ test(
             name,
             phone: "5500000000000",
             passwordHash,
+            emailVerifiedAt: new Date(),
             role: role as Role,
           },
         });
@@ -1420,6 +1421,20 @@ test(
             role: "KITCHEN",
           });
           assert.equal(created.passwordHash, undefined);
+          assert.equal(
+            (
+              await api("sessions", undefined, "POST", {
+                storeSlug: slug,
+                email: created.email,
+                password,
+              })
+            ).status,
+            403,
+          );
+          await db.user.update({
+            where: { id: created.id },
+            data: { emailVerifiedAt: new Date() },
+          });
           const session = await ok("sessions", undefined, "POST", {
             storeSlug: slug,
             email: created.email,
