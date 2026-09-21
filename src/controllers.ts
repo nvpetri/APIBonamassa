@@ -25,6 +25,9 @@ import {
   assignSchema,
   availabilitySchema,
   changePasswordSchema,
+  emailActionSchema,
+  confirmEmailSchema,
+  resetPasswordSchema,
   completeSchema,
   createOrderSchema,
   createProductSchema,
@@ -85,6 +88,46 @@ export class ApiController {
   @ApiTags("Sessão")
   register(@Body() body: unknown) {
     return this.auth.register(registerSchema.parse(body));
+  }
+
+  @Post("auth/email-verification/request")
+  @HttpCode(202)
+  @Public()
+  @BodyDoc(emailActionSchema)
+  @ApiTags("Sessão")
+  requestEmailVerification(@Body() body: unknown) {
+    const input = emailActionSchema.parse(body);
+    return this.auth.requestEmailVerification(input.storeSlug, input.email);
+  }
+
+  @Post("auth/email-verification/confirm")
+  @HttpCode(200)
+  @Public()
+  @BodyDoc(confirmEmailSchema)
+  @ApiTags("Sessão")
+  confirmEmail(@Body() body: unknown) {
+    const input = confirmEmailSchema.parse(body);
+    return this.auth.confirmEmail(input.storeSlug, input.email, input.code);
+  }
+
+  @Post("auth/password-reset/request")
+  @HttpCode(202)
+  @Public()
+  @BodyDoc(emailActionSchema)
+  @ApiTags("Sessão")
+  requestPasswordReset(@Body() body: unknown) {
+    const input = emailActionSchema.parse(body);
+    return this.auth.requestPasswordReset(input.storeSlug, input.email);
+  }
+
+  @Post("auth/password-reset/confirm")
+  @HttpCode(200)
+  @Public()
+  @BodyDoc(resetPasswordSchema)
+  @ApiTags("Sessão")
+  resetPassword(@Body() body: unknown) {
+    const input = resetPasswordSchema.parse(body);
+    return this.auth.resetPassword(input.storeSlug, input.email, input.code, input.newPassword);
   }
 
   @Delete("sessions/current")
