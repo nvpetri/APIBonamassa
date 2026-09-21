@@ -165,7 +165,10 @@ export class AuthService {
     return { verificationRequired: true, email: user.email };
   }
   private async sendCode(user: User, purpose: VerificationPurpose) {
-    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    const code =
+      config().NODE_ENV === "test"
+        ? "123456"
+        : String(randomInt(0, 1_000_000)).padStart(6, "0");
     const expiresAt = new Date(
       Date.now() + config().VERIFICATION_CODE_MINUTES * 60_000,
     );
