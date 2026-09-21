@@ -480,7 +480,9 @@ export const emailActionSchema = z.strictObject({
   storeSlug: slugSchema,
   email: emailSchema,
 });
-export const codeSchema = z.string().regex(/^\d{6}$/, "Informe o código de 6 dígitos.");
+export const codeSchema = z
+  .string()
+  .regex(/^\d{6}$/, "Informe o código de 6 dígitos.");
 export const confirmEmailSchema = emailActionSchema.extend({
   code: codeSchema,
 });
