@@ -66,7 +66,7 @@ export class AuthService {
       throw new RateLimitError(retryAfterSeconds(rows[0].resetsAt));
   }
   async issue(user: User, tx: Tx = this.db) {
-    ensure(user.emailVerifiedAt, "EMAIL_NOT_VERIFIED", "Confirme seu e-mail para continuar.", 403);
+    ensure(\n      user.emailVerifiedAt,\n      "EMAIL_NOT_VERIFIED",\n      "Confirme seu e-mail para continuar.",\n      403,\n    );
     const accessToken = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + config().SESSION_HOURS * 3600_000);
     await tx.session.create({
@@ -94,7 +94,7 @@ export class AuthService {
       "E-mail ou senha inválidos.",
       401,
     );
-    ensure(user.emailVerifiedAt, "EMAIL_NOT_VERIFIED", "Confirme seu e-mail para entrar.", 403);
+    ensure(\n      user.emailVerifiedAt,\n      "EMAIL_NOT_VERIFIED",\n      "Confirme seu e-mail para entrar.",\n      403,\n    );
     const upgradedHash = needsPasswordUpgrade(user.passwordHash)
       ? await hashPassword(input.password)
       : null;
@@ -156,40 +156,40 @@ export class AuthService {
   }
   private async sendCode(user: User, purpose: VerificationPurpose) {
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-    const expiresAt = new Date(Date.now() + config().VERIFICATION_CODE_MINUTES * 60_000);
+    const expiresAt = new Date(\n      Date.now() + config().VERIFICATION_CODE_MINUTES * 60_000,\n    );
     await this.db.verificationCode.create({
-      data: { userId: user.id, purpose, codeHash: tokenHash(`${purpose}:${user.id}:${code}`), expiresAt },
+      data: {\n        userId: user.id,\n        purpose,\n        codeHash: tokenHash(`${purpose}:${user.id}:${code}`),\n        expiresAt,\n      },
     });
-    await this.mailer.code(user.email, code, purpose === "EMAIL_VERIFY" ? "verify" : "reset");
+    await this.mailer.code(\n      user.email,\n      code,\n      purpose === "EMAIL_VERIFY" ? "verify" : "reset",\n    );
   }
   private async userByEmail(storeSlug: string, email: string) {
-    const store = await this.db.store.findUnique({ where: { slug: storeSlug } });
+    const store = await this.db.store.findUnique({\n      where: { slug: storeSlug },\n    });
     if (!store) return null;
-    return this.db.user.findUnique({ where: { storeId_email: { storeId: store.id, email } } });
+    return this.db.user.findUnique({\n      where: { storeId_email: { storeId: store.id, email } },\n    });
   }
   async requestEmailVerification(storeSlug: string, email: string) {
     await this.rate(`verify-request:${storeSlug}:${email}`, 3, 3600);
     const user = await this.userByEmail(storeSlug, email);
-    if (user?.enabled && !user.emailVerifiedAt) await this.sendCode(user, "EMAIL_VERIFY");
+    if (user?.enabled && !user.emailVerifiedAt)\n      await this.sendCode(user, "EMAIL_VERIFY");
     return { accepted: true };
   }
   async confirmEmail(storeSlug: string, email: string, code: string) {
     await this.rate(`verify-confirm:${storeSlug}:${email}`, 10, 900);
     const user = await this.userByEmail(storeSlug, email);
-    ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
+    ensure(\n      user?.enabled,\n      "INVALID_CODE",\n      "Código inválido ou expirado.",\n      400,\n    );
     if (user.emailVerifiedAt) return this.issue(user);
     const record = await this.db.verificationCode.findFirst({
-      where: { userId: user.id, purpose: "EMAIL_VERIFY", consumedAt: null, expiresAt: { gt: new Date() } },
+      where: {\n        userId: user.id,\n        purpose: "EMAIL_VERIFY",\n        consumedAt: null,\n        expiresAt: { gt: new Date() },\n      },
       orderBy: { createdAt: "desc" },
     });
-    const valid = record && record.attempts < 5 && record.codeHash === tokenHash(`EMAIL_VERIFY:${user.id}:${code}`);
+    const valid =\n      record &&\n      record.attempts < 5 &&\n      record.codeHash === tokenHash(`EMAIL_VERIFY:${user.id}:${code}`);
     if (!valid) {
-      if (record) await this.db.verificationCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+      if (record)\n        await this.db.verificationCode.update({\n          where: { id: record.id },\n          data: { attempts: { increment: 1 } },\n        });
       ensure(false, "INVALID_CODE", "Código inválido ou expirado.", 400);
     }
     const verified = await this.db.write(user.storeId, async (tx) => {
-      await tx.verificationCode.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
-      return tx.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date(), version: { increment: 1 } } });
+      await tx.verificationCode.update({\n        where: { id: record.id },\n        data: { consumedAt: new Date() },\n      });
+      return tx.user.update({\n        where: { id: user.id },\n        data: { emailVerifiedAt: new Date(), version: { increment: 1 } },\n      });
     });
     return this.issue(verified);
   }
@@ -199,26 +199,26 @@ export class AuthService {
     if (user?.enabled) await this.sendCode(user, "PASSWORD_RESET");
     return { accepted: true };
   }
-  async resetPassword(storeSlug: string, email: string, code: string, next: string) {
+  async resetPassword(\n    storeSlug: string,\n    email: string,\n    code: string,\n    next: string,\n  ) {
     await this.rate(`reset-confirm:${storeSlug}:${email}`, 10, 900);
     const user = await this.userByEmail(storeSlug, email);
-    ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
+    ensure(\n      user?.enabled,\n      "INVALID_CODE",\n      "Código inválido ou expirado.",\n      400,\n    );
     const record = await this.db.verificationCode.findFirst({
-      where: { userId: user.id, purpose: "PASSWORD_RESET", consumedAt: null, expiresAt: { gt: new Date() } },
+      where: {\n        userId: user.id,\n        purpose: "PASSWORD_RESET",\n        consumedAt: null,\n        expiresAt: { gt: new Date() },\n      },
       orderBy: { createdAt: "desc" },
     });
-    const valid = record && record.attempts < 5 && record.codeHash === tokenHash(`PASSWORD_RESET:${user.id}:${code}`);
+    const valid =\n      record &&\n      record.attempts < 5 &&\n      record.codeHash === tokenHash(`PASSWORD_RESET:${user.id}:${code}`);
     if (!valid) {
-      if (record) await this.db.verificationCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+      if (record)\n        await this.db.verificationCode.update({\n          where: { id: record.id },\n          data: { attempts: { increment: 1 } },\n        });
       ensure(false, "INVALID_CODE", "Código inválido ou expirado.", 400);
     }
     const passwordHash = await hashPassword(next);
     const sessions = await this.db.write(user.storeId, async (tx) => {
-      const sessions = await tx.session.findMany({ where: { userId: user.id }, select: { id: true } });
-      await tx.user.update({ where: { id: user.id }, data: { passwordHash, emailVerifiedAt: user.emailVerifiedAt ?? new Date(), version: { increment: 1 } } });
+      const sessions = await tx.session.findMany({\n        where: { userId: user.id },\n        select: { id: true },\n      });
+      await tx.user.update({\n        where: { id: user.id },\n        data: {\n          passwordHash,\n          emailVerifiedAt: user.emailVerifiedAt ?? new Date(),\n          version: { increment: 1 },\n        },\n      });
       await tx.verificationCode.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
       await tx.session.deleteMany({ where: { userId: user.id } });
-      await tx.audit.create({ data: { storeId: user.storeId, actorId: user.id, action: "user.password.reset", data: json({ userId: user.id }) } });
+      await tx.audit.create({\n        data: {\n          storeId: user.storeId,\n          actorId: user.id,\n          action: "user.password.reset",\n          data: json({ userId: user.id }),\n        },\n      });
       return sessions;
     });
     sessions.forEach((s) => this.bus.revoke(s.id));
