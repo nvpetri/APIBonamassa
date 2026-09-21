@@ -120,6 +120,7 @@ export async function seedStore(
           phone: "5500000000000",
           role: "MANAGER",
           passwordHash,
+          emailVerifiedAt: new Date(),
         },
       });
       if (input.demo)
