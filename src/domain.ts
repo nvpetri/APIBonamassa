@@ -476,6 +476,16 @@ export const changePasswordSchema = z.strictObject({
   currentPassword: z.string().min(1).max(128),
   newPassword: passwordSchema,
 });
+export const emailActionSchema = z.strictObject({
+  storeSlug: slugSchema,
+  email: emailSchema,
+});
+export const codeSchema = z.string().regex(/^\d{6}$/, "Informe o código de 6 dígitos.");
+export const confirmEmailSchema = emailActionSchema.extend({ code: codeSchema });
+export const resetPasswordSchema = emailActionSchema.extend({
+  code: codeSchema,
+  newPassword: passwordSchema,
+});
 export const orderStatuses = [
   "SCHEDULED",
   "NEW",
