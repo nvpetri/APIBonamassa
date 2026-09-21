@@ -127,7 +127,12 @@ export class ApiController {
   @ApiTags("Sessão")
   resetPassword(@Body() body: unknown) {
     const input = resetPasswordSchema.parse(body);
-    return this.auth.resetPassword(\n      input.storeSlug,\n      input.email,\n      input.code,\n      input.newPassword,\n    );
+    return this.auth.resetPassword(
+      input.storeSlug,
+      input.email,
+      input.code,
+      input.newPassword,
+    );
   }
 
   @Delete("sessions/current")
