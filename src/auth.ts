@@ -6,8 +6,8 @@ import {
   createParamDecorator,
 } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { Role, User } from "@prisma/client";
-import { randomBytes } from "node:crypto";
+import { Role, User, VerificationPurpose } from "@prisma/client";
+import { randomBytes, randomInt } from "node:crypto";
 import { Request } from "express";
 import { z } from "zod";
 import { Db, Tx, json, tokenHash } from "./db";
@@ -15,6 +15,7 @@ import { config } from "./config";
 import { ensure, loginSchema, registerSchema, RuleError } from "./domain";
 import { ChangeBus } from "./realtime";
 import { RateLimitError, retryAfterSeconds } from "./rate-limit";
+import { Mailer } from "./mailer";
 
 import {
   dummyPasswordHash,
@@ -37,6 +38,7 @@ export const userDto = (u: User) => ({
   enabled: u.enabled,
   available: u.available,
   version: u.version,
+  emailVerified: !!u.emailVerifiedAt,
   storeId: u.storeId,
 });
 export const Public = () => SetMetadata("public", true);
@@ -51,6 +53,7 @@ export class AuthService {
   constructor(
     private readonly db: Db,
     private readonly bus: ChangeBus,
+    private readonly mailer: Mailer,
   ) {}
   async rate(key: string, limit: number, seconds: number) {
     const rows = await this.db.$queryRaw<{ count: number; resetsAt: Date }[]>`
@@ -63,6 +66,7 @@ export class AuthService {
       throw new RateLimitError(retryAfterSeconds(rows[0].resetsAt));
   }
   async issue(user: User, tx: Tx = this.db) {
+    ensure(user.emailVerifiedAt, "EMAIL_NOT_VERIFIED", "Confirme seu e-mail para continuar.", 403);
     const accessToken = randomBytes(32).toString("base64url");
     const expiresAt = new Date(Date.now() + config().SESSION_HOURS * 3600_000);
     await tx.session.create({
@@ -90,6 +94,7 @@ export class AuthService {
       "E-mail ou senha inválidos.",
       401,
     );
+    ensure(user.emailVerifiedAt, "EMAIL_NOT_VERIFIED", "Confirme seu e-mail para entrar.", 403);
     const upgradedHash = needsPasswordUpgrade(user.passwordHash)
       ? await hashPassword(input.password)
       : null;
@@ -146,7 +151,78 @@ export class AuthService {
         },
       }),
     );
-    return this.issue(user);
+    await this.sendCode(user, "EMAIL_VERIFY");
+    return { verificationRequired: true, email: user.email };
+  }
+  private async sendCode(user: User, purpose: VerificationPurpose) {
+    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    const expiresAt = new Date(Date.now() + config().VERIFICATION_CODE_MINUTES * 60_000);
+    await this.db.verificationCode.create({
+      data: { userId: user.id, purpose, codeHash: tokenHash(`${purpose}:${user.id}:${code}`), expiresAt },
+    });
+    await this.mailer.code(user.email, code, purpose === "EMAIL_VERIFY" ? "verify" : "reset");
+  }
+  private async userByEmail(storeSlug: string, email: string) {
+    const store = await this.db.store.findUnique({ where: { slug: storeSlug } });
+    if (!store) return null;
+    return this.db.user.findUnique({ where: { storeId_email: { storeId: store.id, email } } });
+  }
+  async requestEmailVerification(storeSlug: string, email: string) {
+    await this.rate(`verify-request:${storeSlug}:${email}`, 3, 3600);
+    const user = await this.userByEmail(storeSlug, email);
+    if (user?.enabled && !user.emailVerifiedAt) await this.sendCode(user, "EMAIL_VERIFY");
+    return { accepted: true };
+  }
+  async confirmEmail(storeSlug: string, email: string, code: string) {
+    await this.rate(`verify-confirm:${storeSlug}:${email}`, 10, 900);
+    const user = await this.userByEmail(storeSlug, email);
+    ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
+    if (user.emailVerifiedAt) return this.issue(user);
+    const record = await this.db.verificationCode.findFirst({
+      where: { userId: user.id, purpose: "EMAIL_VERIFY", consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+    const valid = record && record.attempts < 5 && record.codeHash === tokenHash(`EMAIL_VERIFY:${user.id}:${code}`);
+    if (!valid) {
+      if (record) await this.db.verificationCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+      ensure(false, "INVALID_CODE", "Código inválido ou expirado.", 400);
+    }
+    const verified = await this.db.write(user.storeId, async (tx) => {
+      await tx.verificationCode.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
+      return tx.user.update({ where: { id: user.id }, data: { emailVerifiedAt: new Date(), version: { increment: 1 } } });
+    });
+    return this.issue(verified);
+  }
+  async requestPasswordReset(storeSlug: string, email: string) {
+    await this.rate(`reset-request:${storeSlug}:${email}`, 3, 3600);
+    const user = await this.userByEmail(storeSlug, email);
+    if (user?.enabled) await this.sendCode(user, "PASSWORD_RESET");
+    return { accepted: true };
+  }
+  async resetPassword(storeSlug: string, email: string, code: string, next: string) {
+    await this.rate(`reset-confirm:${storeSlug}:${email}`, 10, 900);
+    const user = await this.userByEmail(storeSlug, email);
+    ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
+    const record = await this.db.verificationCode.findFirst({
+      where: { userId: user.id, purpose: "PASSWORD_RESET", consumedAt: null, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: "desc" },
+    });
+    const valid = record && record.attempts < 5 && record.codeHash === tokenHash(`PASSWORD_RESET:${user.id}:${code}`);
+    if (!valid) {
+      if (record) await this.db.verificationCode.update({ where: { id: record.id }, data: { attempts: { increment: 1 } } });
+      ensure(false, "INVALID_CODE", "Código inválido ou expirado.", 400);
+    }
+    const passwordHash = await hashPassword(next);
+    const sessions = await this.db.write(user.storeId, async (tx) => {
+      const sessions = await tx.session.findMany({ where: { userId: user.id }, select: { id: true } });
+      await tx.user.update({ where: { id: user.id }, data: { passwordHash, emailVerifiedAt: user.emailVerifiedAt ?? new Date(), version: { increment: 1 } } });
+      await tx.verificationCode.update({ where: { id: record.id }, data: { consumedAt: new Date() } });
+      await tx.session.deleteMany({ where: { userId: user.id } });
+      await tx.audit.create({ data: { storeId: user.storeId, actorId: user.id, action: "user.password.reset", data: json({ userId: user.id }) } });
+      return sessions;
+    });
+    sessions.forEach((s) => this.bus.revoke(s.id));
+    return { reset: true };
   }
   async authenticate(token: unknown, tx: Tx = this.db): Promise<Actor> {
     ensure(
