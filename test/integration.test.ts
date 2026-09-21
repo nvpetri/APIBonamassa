@@ -752,7 +752,12 @@ test(
           assert.equal(account.verificationRequired, true);
           assert.equal(account.email, "new@example.com");
           const registered = await db.user.findUniqueOrThrow({
-            where: { storeId_email: { storeId: main.store.id, email: "new@example.com" } },
+            where: {
+              storeId_email: {
+                storeId: main.store.id,
+                email: "new@example.com",
+              },
+            },
           });
           assert.equal(registered.role, "CUSTOMER");
           assert.equal(registered.emailVerifiedAt, null);
