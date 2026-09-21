@@ -481,7 +481,7 @@ export const emailActionSchema = z.strictObject({
   email: emailSchema,
 });
 export const codeSchema = z.string().regex(/^\d{6}$/, "Informe o código de 6 dígitos.");
-export const confirmEmailSchema = emailActionSchema.extend({ code: codeSchema });
+export const confirmEmailSchema = emailActionSchema.extend({\n  code: codeSchema,\n});
 export const resetPasswordSchema = emailActionSchema.extend({
   code: codeSchema,
   newPassword: passwordSchema,
