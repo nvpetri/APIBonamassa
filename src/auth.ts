@@ -320,14 +320,21 @@ export class AuthService {
       include: { user: true },
     });
     const now = new Date();
-    const idleCutoff = new Date(now.getTime() - config().SESSION_IDLE_DAYS * 86_400_000);
+    const idleCutoff = new Date(
+      now.getTime() - config().SESSION_IDLE_DAYS * 86_400_000,
+    );
     ensure(
-      session && session.expiresAt > now && session.lastActivityAt > idleCutoff && session.user.enabled,
+      session &&
+        session.expiresAt > now &&
+        session.lastActivityAt > idleCutoff &&
+        session.user.enabled,
       "SESSION_EXPIRED",
       "Sessão expirada ou revogada.",
       401,
     );
-    const refreshedExpiry = new Date(now.getTime() + config().SESSION_HOURS * 3600_000);
+    const refreshedExpiry = new Date(
+      now.getTime() + config().SESSION_HOURS * 3600_000,
+    );
     await tx.session.update({
       where: { id: session.id },
       data: { lastActivityAt: now, expiresAt: refreshedExpiry },
@@ -352,7 +359,8 @@ export class AuthService {
     ensure(
       s &&
         s.expiresAt > new Date() &&
-        s.lastActivityAt > new Date(Date.now() - config().SESSION_IDLE_DAYS * 86_400_000) &&
+        s.lastActivityAt >
+          new Date(Date.now() - config().SESSION_IDLE_DAYS * 86_400_000) &&
         s.user.enabled &&
         s.user.role === actor.role &&
         s.userId === actor.id &&
