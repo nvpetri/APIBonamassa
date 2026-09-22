@@ -319,12 +319,19 @@ export class AuthService {
       where: { tokenHash: tokenHash(token) },
       include: { user: true },
     });
+    const now = new Date();
+    const idleCutoff = new Date(now.getTime() - config().SESSION_IDLE_DAYS * 86_400_000);
     ensure(
-      session && session.expiresAt > new Date() && session.user.enabled,
+      session && session.expiresAt > now && session.lastActivityAt > idleCutoff && session.user.enabled,
       "SESSION_EXPIRED",
       "Sessão expirada ou revogada.",
       401,
     );
+    const refreshedExpiry = new Date(now.getTime() + config().SESSION_HOURS * 3600_000);
+    await tx.session.update({
+      where: { id: session.id },
+      data: { lastActivityAt: now, expiresAt: refreshedExpiry },
+    });
     const { id, storeId, role, name, phone, email } = session.user;
     return {
       id,
@@ -334,7 +341,7 @@ export class AuthService {
       phone,
       email,
       sessionId: session.id,
-      expiresAt: session.expiresAt,
+      expiresAt: refreshedExpiry,
     };
   }
   async assert(tx: Tx, actor: Actor) {
@@ -345,6 +352,7 @@ export class AuthService {
     ensure(
       s &&
         s.expiresAt > new Date() &&
+        s.lastActivityAt > new Date(Date.now() - config().SESSION_IDLE_DAYS * 86_400_000) &&
         s.user.enabled &&
         s.user.role === actor.role &&
         s.userId === actor.id &&
