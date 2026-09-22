@@ -46,22 +46,11 @@ export function attachRealtime(
     }
   });
   io.on("connection", (socket) => {
-    const actor: Actor = socket.data.actor;
-    const expire = setTimeout(
-      () => socket.disconnect(true),
-      +actor.expiresAt - Date.now(),
-    );
-    expire.unref();
-    socket.on("disconnect", () => clearTimeout(expire));
     socket.emit("ready", { reconcile: true });
   });
   const changed = (e: Change) => {
     for (const socket of io.sockets.sockets.values()) {
       const actor: Actor = socket.data.actor;
-      if (+actor.expiresAt <= Date.now()) {
-        socket.disconnect(true);
-        continue;
-      }
       if (actor.storeId !== e.storeId) continue;
       const staff = ["MANAGER", "ATTENDANT", "KITCHEN"].includes(actor.role);
       if (
