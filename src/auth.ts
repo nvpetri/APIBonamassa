@@ -362,6 +362,9 @@ export class AuthService {
       expiresAt: refreshedExpiry,
     };
   }
+  async assertActive(actor: Actor) {
+    return this.assert(this.db, actor);
+  }
   async assert(tx: Tx, actor: Actor) {
     const s = await tx.session.findUnique({
       where: { id: actor.sessionId },

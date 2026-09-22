@@ -1657,6 +1657,51 @@ test(
         },
       );
       await t.test(
+        "WebSocket não prolonga inatividade nem entrega eventos a uma sessão expirada",
+        async () => {
+          const session = await ok("sessions", undefined, "POST", {
+            storeSlug: slug,
+            email: "manager@example.com",
+            password,
+          });
+          const where = { tokenHash: tokenHash(session.accessToken) };
+          const socket = io(base, {
+            transports: ["websocket"],
+            auth: { token: session.accessToken },
+            reconnection: false,
+          });
+          sockets.push(socket);
+          await socketEvent(socket, "ready");
+          const lastActivityAt = new Date(Date.now() - 4 * 86_400_000);
+          await db.session.update({
+            where,
+            data: {
+              lastActivityAt,
+              expiresAt: new Date(Date.now() + 86_400_000),
+            },
+          });
+          const received = socketEvent(socket, "invalidate");
+          await order();
+          await received;
+          assert.equal(
+            (
+              await db.session.findUniqueOrThrow({ where })
+            ).lastActivityAt.getTime(),
+            lastActivityAt.getTime(),
+          );
+          await db.session.update({
+            where,
+            data: { lastActivityAt: new Date(Date.now() - 5 * 86_400_000 - 1) },
+          });
+          const leaked: unknown[] = [];
+          socket.on("invalidate", (event) => leaked.push(event));
+          const disconnected = socketEvent(socket, "disconnect");
+          await order();
+          await disconnected;
+          assert.equal(leaked.length, 0);
+        },
+      );
+      await t.test(
         "gestor cadastra e revoga equipe; senha não aparece na resposta",
         async () => {
           const created = await ok("staff/users", "manager", "POST", {

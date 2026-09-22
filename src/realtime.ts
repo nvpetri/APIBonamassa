@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { EventEmitter } from "node:events";
 import { Server as HttpServer } from "node:http";
-import { Server } from "socket.io";
+import { Server, Socket } from "socket.io";
 import type { Actor, AuthService } from "./auth";
 
 export type Change = {
@@ -45,10 +45,23 @@ export function attachRealtime(
       next(new Error("UNAUTHENTICATED"));
     }
   });
+  const active = async (socket: Socket) => {
+    try {
+      // Notifications do not count as user activity; only authenticate() renews a session.
+      await auth.assertActive(socket.data.actor);
+      return socket.connected;
+    } catch {
+      socket.disconnect(true);
+      return false;
+    }
+  };
   io.on("connection", (socket) => {
     socket.emit("ready", { reconcile: true });
+    const timer = setInterval(() => void active(socket), 60_000);
+    timer.unref();
+    socket.on("disconnect", () => clearInterval(timer));
   });
-  const changed = (e: Change) => {
+  const changed = async (e: Change) => {
     for (const socket of io.sockets.sockets.values()) {
       const actor: Actor = socket.data.actor;
       if (actor.storeId !== e.storeId) continue;
@@ -61,6 +74,7 @@ export function attachRealtime(
         actor.id !== e.previousDriverId
       )
         continue;
+      if (!(await active(socket))) continue;
       socket.emit("invalidate", {
         type: e.type,
         ...(e.orderId ? { orderId: e.orderId, version: e.version } : {}),
