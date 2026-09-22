@@ -798,6 +798,241 @@ test(
           assert.equal(r.status, 400);
         },
       );
+      await t.test(
+        "confirmação exige código válido e só emite uma sessão, inclusive com concorrência",
+        async () => {
+          const email = "verification@example.com";
+          const body = { storeSlug: slug, email };
+          await ok("customers", undefined, "POST", {
+            ...body,
+            password,
+            name: "Verificação",
+            phone: "11912345678",
+          });
+          assert.equal(
+            (await api("sessions", undefined, "POST", { ...body, password }))
+              .data.code,
+            "EMAIL_NOT_VERIFIED",
+          );
+          const wrong = await api(
+            "auth/email-verification/confirm",
+            undefined,
+            "POST",
+            { ...body, code: "000000" },
+          );
+          assert.equal(wrong.status, 400);
+          assert.equal(wrong.data.accessToken, undefined);
+          const results = await Promise.all(
+            [1, 2].map(() =>
+              api("auth/email-verification/confirm", undefined, "POST", {
+                ...body,
+                code: "123456",
+              }),
+            ),
+          );
+          assert.deepEqual(results.map((r) => r.status).sort(), [200, 400]);
+          const verified = results.find((r) => r.status === 200)!.data;
+          assert.equal(verified.user.emailVerified, true);
+          assert.equal(
+            await db.session.count({ where: { userId: verified.user.id } }),
+            1,
+          );
+          for (const code of ["123456", "999999"]) {
+            const replay = await api(
+              "auth/email-verification/confirm",
+              undefined,
+              "POST",
+              { ...body, code },
+            );
+            assert.equal(replay.status, 400);
+            assert.equal(replay.data.accessToken, undefined);
+          }
+          // Existing staff accounts must not be reachable with an arbitrary confirmation code.
+          assert.equal(
+            (
+              await api("auth/email-verification/confirm", undefined, "POST", {
+                storeSlug: slug,
+                email: "manager@example.com",
+                code: "000000",
+              })
+            ).status,
+            400,
+          );
+          tokens.verified = verified.accessToken;
+          const second = await ok("sessions", undefined, "POST", {
+            ...body,
+            password,
+          });
+          tokens.verifiedSecond = second.accessToken;
+          await ok("auth/password-reset/request", undefined, "POST", body);
+          const next = "Password-after-reset-2026";
+          const resets = await Promise.all(
+            [1, 2].map(() =>
+              api("auth/password-reset/confirm", undefined, "POST", {
+                ...body,
+                code: "123456",
+                newPassword: next,
+              }),
+            ),
+          );
+          assert.deepEqual(resets.map((r) => r.status).sort(), [200, 400]);
+          assert.equal((await api("me", "verified")).status, 401);
+          assert.equal((await api("me", "verifiedSecond")).status, 401);
+          assert.equal(
+            (await api("sessions", undefined, "POST", { ...body, password }))
+              .status,
+            401,
+          );
+          assert.ok(
+            (
+              await ok("sessions", undefined, "POST", {
+                ...body,
+                password: next,
+              })
+            ).accessToken,
+          );
+          const replay = await api(
+            "auth/password-reset/confirm",
+            undefined,
+            "POST",
+            { ...body, code: "123456", newPassword: password },
+          );
+          assert.equal(replay.status, 400);
+          assert.equal(
+            (await api("sessions", undefined, "POST", { ...body, password }))
+              .status,
+            401,
+          );
+        },
+      );
+      await t.test(
+        "códigos expiram, limitam tentativas e o reenvio invalida os anteriores",
+        async () => {
+          const body = { storeSlug: slug, email: "attempts@example.com" };
+          await ok("customers", undefined, "POST", {
+            ...body,
+            password,
+            name: "Tentativas",
+            phone: "11912345678",
+          });
+          const user = await db.user.findUniqueOrThrow({
+            where: {
+              storeId_email: { storeId: main.store.id, email: body.email },
+            },
+          });
+          for (let i = 0; i < 5; i++)
+            assert.equal(
+              (
+                await api(
+                  "auth/email-verification/confirm",
+                  undefined,
+                  "POST",
+                  { ...body, code: "000000" },
+                )
+              ).status,
+              400,
+            );
+          assert.equal(
+            (
+              await api("auth/email-verification/confirm", undefined, "POST", {
+                ...body,
+                code: "123456",
+              })
+            ).status,
+            400,
+          );
+          const old = await db.verificationCode.findFirstOrThrow({
+            where: { userId: user.id },
+          });
+          assert.ok(old.attempts >= 5);
+          await ok("auth/email-verification/request", undefined, "POST", body);
+          assert.ok(
+            (
+              await db.verificationCode.findUniqueOrThrow({
+                where: { id: old.id },
+              })
+            ).consumedAt,
+          );
+          await db.verificationCode.updateMany({
+            where: { userId: user.id, consumedAt: null },
+            data: { expiresAt: new Date(Date.now() - 1) },
+          });
+          assert.equal(
+            (
+              await api("auth/email-verification/confirm", undefined, "POST", {
+                ...body,
+                code: "123456",
+              })
+            ).status,
+            400,
+          );
+          await ok("auth/email-verification/request", undefined, "POST", body);
+          assert.ok(
+            (
+              await ok("auth/email-verification/confirm", undefined, "POST", {
+                ...body,
+                code: "123456",
+              })
+            ).accessToken,
+          );
+        },
+      );
+      await t.test(
+        "sessões de todos os perfis renovam por uso e expiram após cinco dias inativos",
+        async () => {
+          const day = 86_400_000;
+          const legacyHours = process.env.SESSION_HOURS;
+          process.env.SESSION_HOURS = "1"; // Old deploy settings cannot shorten the agreed idle window.
+          try {
+            for (const role of [
+              "customer",
+              "manager",
+              "attendant",
+              "kitchen",
+              "driver",
+            ]) {
+              const session = await ok("sessions", undefined, "POST", {
+                storeSlug: slug,
+                email: `${role}@example.com`,
+                password,
+              });
+              assert.ok(
+                Date.parse(session.expiresAt) > Date.now() + 5 * day - 10_000,
+              );
+              const token = `idle-${role}`;
+              tokens[token] = session.accessToken;
+              const where = { tokenHash: tokenHash(session.accessToken) };
+              await db.session.update({
+                where,
+                data: {
+                  createdAt: new Date(Date.now() - 90 * day),
+                  lastActivityAt: new Date(Date.now() - 4 * day),
+                  expiresAt: new Date(Date.now() + day),
+                },
+              });
+              const active = await api("me", token);
+              assert.equal(active.status, 200);
+              assert.ok(
+                Date.parse(active.headers.get("x-session-expires-at")!) >
+                  Date.now() + 5 * day - 10_000,
+              );
+              const renewed = await db.session.findUniqueOrThrow({ where });
+              assert.ok(renewed.lastActivityAt.getTime() > Date.now() - 10_000);
+              await db.session.update({
+                where,
+                data: {
+                  lastActivityAt: new Date(Date.now() - 5 * day - 1),
+                  expiresAt: new Date(Date.now() + day),
+                },
+              });
+              assert.equal((await api("me", token)).status, 401);
+            }
+          } finally {
+            if (legacyHours === undefined) delete process.env.SESSION_HOURS;
+            else process.env.SESSION_HOURS = legacyHours;
+          }
+        },
+      );
       let durable: any;
       await t.test(
         "retries simultâneos criam somente uma cotação e um pedido",

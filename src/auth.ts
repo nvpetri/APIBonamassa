@@ -8,7 +8,7 @@ import {
 import { Reflector } from "@nestjs/core";
 import { Role, User, VerificationPurpose } from "@prisma/client";
 import { randomBytes, randomInt } from "node:crypto";
-import { Request } from "express";
+import { Request, Response } from "express";
 import { z } from "zod";
 import { Db, Tx, json, tokenHash } from "./db";
 import { config } from "./config";
@@ -73,7 +73,9 @@ export class AuthService {
       403,
     );
     const accessToken = randomBytes(32).toString("base64url");
-    const expiresAt = new Date(Date.now() + config().SESSION_HOURS * 3600_000);
+    const expiresAt = new Date(
+      Date.now() + config().SESSION_IDLE_DAYS * 86_400_000,
+    );
     await tx.session.create({
       data: { userId: user.id, tokenHash: tokenHash(accessToken), expiresAt },
     });
@@ -172,13 +174,19 @@ export class AuthService {
     const expiresAt = new Date(
       Date.now() + config().VERIFICATION_CODE_MINUTES * 60_000,
     );
-    await this.db.verificationCode.create({
-      data: {
-        userId: user.id,
-        purpose,
-        codeHash: tokenHash(`${purpose}:${user.id}:${code}`),
-        expiresAt,
-      },
+    await this.db.write(user.storeId, async (tx) => {
+      await tx.verificationCode.updateMany({
+        where: { userId: user.id, purpose, consumedAt: null },
+        data: { consumedAt: new Date() },
+      });
+      await tx.verificationCode.create({
+        data: {
+          userId: user.id,
+          purpose,
+          codeHash: tokenHash(`${purpose}:${user.id}:${code}`),
+          expiresAt,
+        },
+      });
     });
     await this.mailer.code(
       user.email,
@@ -206,11 +214,36 @@ export class AuthService {
     await this.rate(`verify-confirm:${storeSlug}:${email}`, 10, 900);
     const user = await this.userByEmail(storeSlug, email);
     ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
-    if (user.emailVerifiedAt) return this.issue(user);
-    const record = await this.db.verificationCode.findFirst({
+    const session = await this.db.write(user.storeId, async (tx) => {
+      const current = await tx.user.findUnique({ where: { id: user.id } });
+      if (!current?.enabled || current.emailVerifiedAt) return null;
+      if (!(await this.consumeCode(tx, current, "EMAIL_VERIFY", code)))
+        return null;
+      const verified = await tx.user.update({
+        where: { id: current.id },
+        data: { emailVerifiedAt: new Date(), version: { increment: 1 } },
+      });
+      return this.issue(verified, tx);
+    });
+    ensure(
+      session,
+      "INVALID_CODE",
+      "Código inválido ou expirado. Se já confirmou seu e-mail, entre com sua senha.",
+      400,
+    );
+    return session;
+  }
+  // Called under the store lock. Invalid attempts are committed before the caller rejects.
+  private async consumeCode(
+    tx: Tx,
+    user: User,
+    purpose: VerificationPurpose,
+    code: string,
+  ) {
+    const record = await tx.verificationCode.findFirst({
       where: {
         userId: user.id,
-        purpose: "EMAIL_VERIFY",
+        purpose,
         consumedAt: null,
         expiresAt: { gt: new Date() },
       },
@@ -219,26 +252,20 @@ export class AuthService {
     const valid =
       record &&
       record.attempts < 5 &&
-      record.codeHash === tokenHash(`EMAIL_VERIFY:${user.id}:${code}`);
+      record.codeHash === tokenHash(`${purpose}:${user.id}:${code}`);
     if (!valid) {
       if (record)
-        await this.db.verificationCode.update({
+        await tx.verificationCode.update({
           where: { id: record.id },
           data: { attempts: { increment: 1 } },
         });
-      ensure(false, "INVALID_CODE", "Código inválido ou expirado.", 400);
+      return false;
     }
-    const verified = await this.db.write(user.storeId, async (tx) => {
-      await tx.verificationCode.update({
-        where: { id: record.id },
-        data: { consumedAt: new Date() },
-      });
-      return tx.user.update({
-        where: { id: user.id },
-        data: { emailVerifiedAt: new Date(), version: { increment: 1 } },
-      });
+    await tx.verificationCode.update({
+      where: { id: record.id },
+      data: { consumedAt: new Date() },
     });
-    return this.issue(verified);
+    return true;
   }
   async requestPasswordReset(storeSlug: string, email: string) {
     await this.rate(`reset-request:${storeSlug}:${email}`, 3, 3600);
@@ -255,29 +282,12 @@ export class AuthService {
     await this.rate(`reset-confirm:${storeSlug}:${email}`, 10, 900);
     const user = await this.userByEmail(storeSlug, email);
     ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
-    const record = await this.db.verificationCode.findFirst({
-      where: {
-        userId: user.id,
-        purpose: "PASSWORD_RESET",
-        consumedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-      orderBy: { createdAt: "desc" },
-    });
-    const valid =
-      record &&
-      record.attempts < 5 &&
-      record.codeHash === tokenHash(`PASSWORD_RESET:${user.id}:${code}`);
-    if (!valid) {
-      if (record)
-        await this.db.verificationCode.update({
-          where: { id: record.id },
-          data: { attempts: { increment: 1 } },
-        });
-      ensure(false, "INVALID_CODE", "Código inválido ou expirado.", 400);
-    }
     const passwordHash = await hashPassword(next);
     const sessions = await this.db.write(user.storeId, async (tx) => {
+      const current = await tx.user.findUnique({ where: { id: user.id } });
+      if (!current?.enabled) return null;
+      if (!(await this.consumeCode(tx, current, "PASSWORD_RESET", code)))
+        return null;
       const sessions = await tx.session.findMany({
         where: { userId: user.id },
         select: { id: true },
@@ -286,12 +296,12 @@ export class AuthService {
         where: { id: user.id },
         data: {
           passwordHash,
-          emailVerifiedAt: user.emailVerifiedAt ?? new Date(),
+          emailVerifiedAt: current.emailVerifiedAt ?? new Date(),
           version: { increment: 1 },
         },
       });
-      await tx.verificationCode.update({
-        where: { id: record.id },
+      await tx.verificationCode.updateMany({
+        where: { userId: user.id, consumedAt: null },
         data: { consumedAt: new Date() },
       });
       await tx.session.deleteMany({ where: { userId: user.id } });
@@ -305,6 +315,7 @@ export class AuthService {
       });
       return sessions;
     });
+    ensure(sessions, "INVALID_CODE", "Código inválido ou expirado.", 400);
     sessions.forEach((s) => this.bus.revoke(s.id));
     return { reset: true };
   }
@@ -333,7 +344,7 @@ export class AuthService {
       401,
     );
     const refreshedExpiry = new Date(
-      now.getTime() + config().SESSION_HOURS * 3600_000,
+      now.getTime() + config().SESSION_IDLE_DAYS * 86_400_000,
     );
     await tx.session.update({
       where: { id: session.id },
@@ -441,7 +452,9 @@ export class AccessGuard implements CanActivate {
     // A coarse edge ceiling still bounds authentication/DB work.
     await this.auth.rate(`http:edge:${req.ip}`, 6000, 60);
     if (isPublic) {
-      const sensitive = /^\/v1\/(sessions|customers)$/.test(req.path);
+      const sensitive = /^\/v1\/(sessions|customers|auth(?:\/|$))/.test(
+        req.path,
+      );
       await this.auth.rate(
         `http:${sensitive ? "auth" : "anonymous"}:${req.ip}`,
         sensitive ? 60 : 600,
@@ -474,6 +487,10 @@ export class AccessGuard implements CanActivate {
       "Este perfil não pode executar esta operação.",
       403,
     );
+    ctx
+      .switchToHttp()
+      .getResponse<Response>()
+      .setHeader("X-Session-Expires-At", req.actor.expiresAt.toISOString());
     return true;
   }
 }

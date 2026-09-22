@@ -12,18 +12,20 @@ Os modelos [.env.production.example](../../.env.production.example) da API e do 
 
 ## API
 
-| Variável                      | Produção                                                  | Por quê                                           |
-| ----------------------------- | --------------------------------------------------------- | ------------------------------------------------- |
-| NODE_ENV                      | production                                                | Runtime de produção                               |
-| APP_ENV                       | production; staging no ambiente de ensaio                 | Ativa verificações                                |
-| DATABASE_URL                  | URL PostgreSQL própria deste ambiente                     | Acesso ao banco                                   |
-| CORS_ORIGINS                  | Vazio no desenho atual com BFF + Android                  | Não abrir acesso de navegador indiscriminadamente |
-| DOCS_ENABLED                  | false                                                     | Não expor documentação interativa                 |
-| SESSION_HOURS                 | 12, ou prazo menor aprovado                               | Expiração das sessões                             |
-| SEED_DEMO                     | false                                                     | Não inserir cardápio/abertura de demonstração     |
-| CUSTOMER_REGISTRATION_ENABLED | false no piloto restrito, após cadastrar os participantes | Suspender novas contas sem revogar as existentes  |
-| TRUSTED_PROXY_CIDRS           | Somente proxies cuja topologia foi validada               | Não confiar em IP enviado pelo cliente            |
-| PORT                          | Variável fornecida pelo Render                            | API escuta em 0.0.0.0                             |
+| Variável                      | Produção                                                  | Por quê                                                   |
+| ----------------------------- | --------------------------------------------------------- | --------------------------------------------------------- |
+| NODE_ENV                      | production                                                | Runtime de produção                                       |
+| APP_ENV                       | production; staging no ambiente de ensaio                 | Ativa verificações                                        |
+| DATABASE_URL                  | URL PostgreSQL própria deste ambiente                     | Acesso ao banco                                           |
+| CORS_ORIGINS                  | Vazio no desenho atual com BFF + Android                  | Não abrir acesso de navegador indiscriminadamente         |
+| DOCS_ENABLED                  | false                                                     | Não expor documentação interativa                         |
+| SESSION_IDLE_DAYS             | 5                                                         | Expiração após cinco dias sem uso, renovada a cada acesso |
+| EMAIL_API_KEY                 | Chave privada do provedor de e-mail                       | Envio de confirmação e recuperação de senha               |
+| EMAIL_FROM                    | Remetente autorizado no provedor                          | Entrega dos códigos aos clientes e à equipe               |
+| SEED_DEMO                     | false                                                     | Não inserir cardápio/abertura de demonstração             |
+| CUSTOMER_REGISTRATION_ENABLED | false no piloto restrito, após cadastrar os participantes | Suspender novas contas sem revogar as existentes          |
+| TRUSTED_PROXY_CIDRS           | Somente proxies cuja topologia foi validada               | Não confiar em IP enviado pelo cliente                    |
+| PORT                          | Variável fornecida pelo Render                            | API escuta em 0.0.0.0                                     |
 
 A conexão Prisma/PostgreSQL deve conter **uma ocorrência** de sslmode=require e sslaccept=strict. Exemplo de formato, sem credenciais reais:
 

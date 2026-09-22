@@ -12,9 +12,9 @@ try {
     console.warn(
       "PENDENTE: proxies não configurados. Limites anônimos podem ser compartilhados; valide a topologia em homologação.",
     );
-  if (result.CUSTOMER_REGISTRATION_ENABLED === "true")
+  if (!result.EMAIL_API_KEY)
     console.warn(
-      "PENDENTE: cadastro público sem verificação de contato. Validar proteção contra abuso antes do lançamento aberto.",
+      "PENDENTE: EMAIL_API_KEY não configurada. Confirmação de e-mail e recuperação de senha não poderão enviar códigos.",
     );
   console.log(
     "Este check não comprova conectividade, backup, capacidade ou segurança completa.",

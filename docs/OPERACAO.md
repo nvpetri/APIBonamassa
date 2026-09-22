@@ -2,19 +2,19 @@
 
 ## Configuração
 
-| Variável                                                         | Uso                                                             |
-| ---------------------------------------------------------------- | --------------------------------------------------------------- |
-| `DATABASE_URL`                                                   | PostgreSQL; `.env` é local e não deve ser versionado.           |
-| `PORT`                                                           | Porta HTTP, padrão 3001.                                        |
-| `NODE_ENV`                                                       | development, test ou production.                                |
-| `CORS_ORIGINS`                                                   | Origens exatas, separadas por vírgula; em produção exige HTTPS. |
-| `SESSION_HOURS`                                                  | Duração de 1 a 24 horas, padrão 12.                             |
-| `DOCS_ENABLED`                                                   | Swagger público para desenvolvimento/homologação; padrão false. |
-| `SEED_STORE_SLUG`, `SEED_MANAGER_EMAIL`, `SEED_MANAGER_PASSWORD` | Configuração do bootstrap, sem senha embutida.                  |
-| `SEED_DEMO`                                                      | Exemplos apenas quando true; recusado com NODE_ENV=production.  |
-| `TEST_DATABASE_URL`                                              | Banco separado para testes de integração.                       |
+| Variável                                                         | Uso                                                              |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `DATABASE_URL`                                                   | PostgreSQL; `.env` é local e não deve ser versionado.            |
+| `PORT`                                                           | Porta HTTP, padrão 3001.                                         |
+| `NODE_ENV`                                                       | development, test ou production.                                 |
+| `CORS_ORIGINS`                                                   | Origens exatas, separadas por vírgula; em produção exige HTTPS.  |
+| `SESSION_IDLE_DAYS`                                              | Cinco dias sem uso; cada requisição autenticada renova a janela. |
+| `DOCS_ENABLED`                                                   | Swagger público para desenvolvimento/homologação; padrão false.  |
+| `SEED_STORE_SLUG`, `SEED_MANAGER_EMAIL`, `SEED_MANAGER_PASSWORD` | Configuração do bootstrap, sem senha embutida.                   |
+| `SEED_DEMO`                                                      | Exemplos apenas quando true; recusado com NODE_ENV=production.   |
+| `TEST_DATABASE_URL`                                              | Banco separado para testes de integração.                        |
 
-O seed é explícito e não roda no startup padrão (`npm start` ou o CMD do Dockerfile). O comando opcional `npm run start:deploy`, descrito abaixo, executa migrations e seed antes de iniciar a API. O seed não sobrescreve preços ou credenciais existentes. Para uma nova loja operacional, execute com `SEED_DEMO=false`, depois cadastre dados oficiais usando o gestor. Cadastros públicos são sempre clientes; criação de equipe exige gestor autenticado. Não há recuperação de senha por e-mail nesta etapa.
+O seed é explícito e não roda no startup padrão (`npm start` ou o CMD do Dockerfile). O comando opcional `npm run start:deploy`, descrito abaixo, executa migrations e seed antes de iniciar a API. O seed não sobrescreve preços ou credenciais existentes. Para uma nova loja operacional, execute com `SEED_DEMO=false`, depois cadastre dados oficiais usando o gestor. Cadastros públicos são sempre clientes; criação de equipe exige gestor autenticado. Confirmação de e-mail e recuperação de senha usam códigos de uso único. Configure `EMAIL_API_KEY`, `EMAIL_FROM` e `EMAIL_API_URL` no serviço; os testes de CI não comprovam entrega real de e-mails.
 
 ## Render com PostgreSQL no Neon
 

@@ -63,7 +63,7 @@ export async function createApp(quiet = false) {
     origin: env.origins,
     credentials: false,
     allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
-    exposedHeaders: ["X-Request-Id"],
+    exposedHeaders: ["X-Request-Id", "X-Session-Expires-At"],
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   });
   app.setGlobalPrefix("v1");
