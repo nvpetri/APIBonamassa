@@ -12,7 +12,8 @@ export function config(env: NodeJS.ProcessEnv = process.env) {
       DATABASE_URL: z.string().url(),
       CORS_ORIGINS: z.string().default("http://localhost:3000"),
       DOCS_ENABLED: z.enum(["true", "false"]).default("false"),
-      SESSION_HOURS: z.coerce.number().int().min(1).max(24).default(12),
+      SESSION_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(24 * 30),
+      SESSION_IDLE_DAYS: z.coerce.number().int().min(1).max(30).default(5),
       CUSTOMER_REGISTRATION_ENABLED: z.enum(["true", "false"]).default("true"),
       EMAIL_API_KEY: z.string().min(1).optional(),
       EMAIL_FROM: z
