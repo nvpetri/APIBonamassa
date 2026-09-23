@@ -265,6 +265,15 @@ test(
             where: { id: ids.driver2 },
             data: { available: false },
           });
+          const metricsPromotion = await db.promotion.create({
+            data: {
+              id: randomUUID(),
+              storeId: main.store.id,
+              data: { ...campaign, kind: "FIXED", value: 500 },
+              pizzaLimit: 1,
+              sold: 1,
+            },
+          });
           const fixture = async (
             options: {
               count?: number;
@@ -280,8 +289,12 @@ test(
               discount?: number;
             } = {},
           ) => {
+            const mode = options.driverId ? "DELIVERY" : "PICKUP";
             const input = quoteSchema.parse({
               ...draft,
+              mode,
+              address: mode === "DELIVERY" ? draft.address : null,
+              promotionId: options.discount ? metricsPromotion.id : null,
               cashTendered: null,
               items: options.combo
                 ? [
@@ -298,8 +311,18 @@ test(
             const priced = price(
               demoProducts,
               input,
-              options.channel === "COUNTER" ? 0 : 700,
-              null,
+              mode === "PICKUP" ? 0 : 700,
+              options.discount
+                ? {
+                    ...campaign,
+                    id: metricsPromotion.id,
+                    version: 1,
+                    kind: "FIXED",
+                    value: 500,
+                    reserved: 0,
+                    sold: 0,
+                  }
+                : null,
             );
             const frozen = JSON.parse(JSON.stringify(priced));
             if (options.legacy) delete frozen.pizzaQuantity;
@@ -334,7 +357,14 @@ test(
                 quoteId,
                 status,
                 driverId: options.driverId,
-                mode: options.channel === "COUNTER" ? "PICKUP" : "DELIVERY",
+                mode,
+                deliveryStatus: options.driverId
+                  ? status === "OUT_FOR_DELIVERY"
+                    ? "ON_ROUTE"
+                    : status === "RETURNED"
+                      ? "RETURNED"
+                      : "DELIVERED"
+                  : null,
                 channel: options.channel ?? "APP",
                 payment: options.payment ?? "CASH",
                 paymentRecorded: true,
@@ -343,8 +373,11 @@ test(
                 items: priced.items,
                 subtotal: priced.subtotal,
                 fee: priced.fee,
-                discount: options.discount ?? 0,
-                total: priced.total - (options.discount ?? 0),
+                discount: priced.discount,
+                total: priced.total,
+                promotionId: priced.promotion?.id,
+                promotionQuantity: priced.promotion?.pizzaQuantity ?? 0,
+                promotionSnapshot: priced.promotion ?? Prisma.DbNull,
                 driverFee: options.driverId ? 800 : 0,
                 createdAt,
                 updatedAt: options.legacy
@@ -360,7 +393,7 @@ test(
                   version: 2,
                   action:
                     status === "DELIVERED"
-                      ? options.channel === "COUNTER"
+                      ? mode === "PICKUP"
                         ? "pickup-complete"
                         : "complete"
                       : status === "CANCELLED"
@@ -525,6 +558,11 @@ test(
             });
             await db.order.deleteMany({ where: { id: { in: orderIds } } });
             await db.quote.deleteMany({ where: { id: { in: quoteIds } } });
+            await db.promotion.delete({
+              where: {
+                storeId_id: { storeId: main.store.id, id: metricsPromotion.id },
+              },
+            });
             await db.user.delete({ where: { id: disabledDriver.id } });
             await db.user.update({
               where: { id: ids.driver2 },
