@@ -51,6 +51,7 @@ test("meio a meio cobra maior sabor e uma borda por pizza", () => {
   );
   assert.equal(result.items[0].unitPrice, 7000);
   assert.equal(result.total, 14700);
+  assert.equal(result.pizzaQuantity, 2);
 });
 test("combo usa preço fechado, receita por unidade e referência avulsa independente", () => {
   const result = price(
@@ -65,6 +66,7 @@ test("combo usa preço fechado, receita por unidade e referência avulsa indepen
     null,
   );
   assert.equal(result.total, 13000);
+  assert.equal(result.pizzaQuantity, 2);
   assert.equal(result.items[0].components?.[0].quantity, 1);
   const comparison = comboComparison(demoProducts, demoProducts.at(-1)!);
   assert.equal(comparison.individualTotal, 7400);
@@ -270,4 +272,27 @@ test("desconto não permite subtotal acima do limite nem overflow no banco", () 
       ),
     /valor máximo/,
   );
+});
+
+test("métrica de pizzas inclui quantidades da receita e exclui bebidas", () => {
+  const products = structuredClone(demoProducts);
+  const combo = products.find((p) => p.id === "combo-dupla")!;
+  const ingredient = combo.combo!.find((i) => i.kind === "PIZZA")!;
+  ingredient.quantity = 2;
+  const result = price(
+    products,
+    {
+      ...draft,
+      items: [
+        { ...pizza, quantity: 3 },
+        { kind: "COMBO", productId: combo.id, quantity: 4, note: "" },
+        { kind: "DRINK", productId: "refrigerante-2l", quantity: 5 },
+      ],
+    },
+    0,
+    null,
+  );
+  assert.equal(result.pizzaQuantity, 11);
+  ingredient.quantity = 5;
+  assert.equal(result.pizzaQuantity, 11);
 });

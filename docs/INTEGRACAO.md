@@ -193,3 +193,13 @@ Os avisos são enviados depois do commit, sem garantia de entrega. Reconsultar R
 No painel, um BFF do Next pode manter o Bearer no servidor e usar cookie HttpOnly para o navegador; esta API ainda não fornece autenticação por cookie. Nos Android, a integração deve implementar armazenamento protegido de sessão, fila de comandos, INTERNET e configuração de rede apenas de debug para servidor local. Não colocar segredos de gateway no APK. Para emulador Android, o host local costuma ser `10.0.2.2:3001`; dispositivos físicos precisam acessar o IP de desenvolvimento na mesma rede.
 
 Fontes técnicas: [autenticação no NestJS](https://docs.nestjs.com/security/authentication) e [OpenAPI no NestJS](https://docs.nestjs.com/openapi/introduction).
+
+## Dashboard gerencial
+
+`GET /v1/staff/dashboard?from=2026-09-01&to=2026-09-23` é exclusivo de `MANAGER`. As datas são inclusivas no fuso `America/Sao_Paulo`; o intervalo máximo é 366 dias. A resposta agrega todos os pedidos da loja, sem depender das páginas do histórico.
+
+Pedidos recebidos são contados pela criação; vendas, pizzas e valores, pela conclusão (`complete`/`pickup-complete`). Cancelamentos e devoluções usam a data do encerramento e ficam fora das vendas. Portanto, recebidos e concluídos no mesmo período podem se referir a pedidos diferentes. Valores são centavos inteiros. O faturamento inclui frete e desconta promoções; `driverFees` inclui comissões de entregas concluídas e `afterDriverFees` não representa lucro nem conciliação bancária.
+
+`channels` separa APP, WHATSAPP e COUNTER; `payments` separa CASH, CARD e PREPAID. `timeline` preenche dias sem movimento com zero. `operation` e o balanço de disponibilidade dos motoboys são a situação atual, independente do filtro; entregas, devoluções e comissões por motoboy respeitam o período. Disponibilidade é declarada, não presença online ou GPS.
+
+Novas cotações persistem `priced.pizzaQuantity`, contando pizzas avulsas e quantidades das receitas de combos; meio a meio conta uma pizza. Pedidos antigos sem esse campo contam suas pizzas avulsas. Se também contêm combos, `incompletePizzaOrders` sinaliza a lacuna histórica; o painel informa que o total de pizzas é parcial, sem tentar reconstruir receitas antigas pelo cardápio atual. Não há migração de banco para esta entrega.

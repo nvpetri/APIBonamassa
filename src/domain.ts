@@ -204,6 +204,7 @@ export type Discount = {
 };
 export type Priced = {
   items: SnapshotItem[];
+  pizzaQuantity: number;
   subtotal: number;
   fee: number;
   discount: number;
@@ -390,6 +391,21 @@ export function price(
   );
   return {
     items,
+    // Freeze the recipe at quote time; later catalog edits must not change sales metrics.
+    pizzaQuantity: draft.items.reduce((sum, item) => {
+      if (item.kind === "PIZZA") return sum + item.quantity;
+      if (item.kind === "DRINK") return sum;
+      const combo = product(products, item.productId, "COMBO", true).combo!;
+      return (
+        sum +
+        item.quantity *
+          combo.reduce(
+            (count, component) =>
+              count + (component.kind === "PIZZA" ? component.quantity : 0),
+            0,
+          )
+      );
+    }, 0),
     subtotal,
     fee,
     discount: discount?.amount ?? 0,

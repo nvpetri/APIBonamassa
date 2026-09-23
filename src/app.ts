@@ -17,6 +17,7 @@ import { StaffService } from "./staff";
 import { Writes } from "./writes";
 import { SchedulingService } from "./scheduling";
 import { Mailer } from "./mailer";
+import { AnalyticsService } from "./analytics";
 
 @Module({
   controllers: [ApiController],
@@ -30,6 +31,7 @@ import { Mailer } from "./mailer";
     ChangeBus,
     SchedulingService,
     Mailer,
+    AnalyticsService,
     { provide: APP_GUARD, useClass: AccessGuard },
   ],
 })

@@ -53,6 +53,7 @@ import { BodyDoc, Mutation } from "./http";
 import { OrdersService } from "./orders";
 import { StaffService } from "./staff";
 import { keySchema } from "./writes";
+import { AnalyticsService, analyticsQuery } from "./analytics";
 
 @Controller()
 @ApiBearerAuth()
@@ -63,6 +64,7 @@ export class ApiController {
     private readonly orders: OrdersService,
     private readonly staff: StaffService,
     private readonly db: Db,
+    private readonly analytics: AnalyticsService,
   ) {}
 
   @Get("health")
@@ -195,6 +197,13 @@ export class ApiController {
   @ApiTags("Gestão do cardápio")
   staffCatalog(@Current() actor: Actor) {
     return this.catalogService.staffCatalog(actor);
+  }
+
+  @Get("staff/dashboard")
+  @Roles("MANAGER")
+  @ApiTags("Dashboard gerencial")
+  dashboard(@Current() actor: Actor, @Query() query: unknown) {
+    return this.analytics.dashboard(actor, analyticsQuery.parse(query));
   }
 
   @Post("staff/products")

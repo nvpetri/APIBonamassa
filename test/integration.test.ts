@@ -1,14 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID, scrypt } from "node:crypto";
-import { PrismaClient, Role } from "@prisma/client";
+import { Prisma, PrismaClient, Role } from "@prisma/client";
 import { io, Socket } from "socket.io-client";
 import sharp from "sharp";
 import { createApp } from "../src/app";
 import { AuthService, hashPassword } from "../src/auth";
 import { tokenHash } from "../src/db";
+import { price, quoteSchema } from "../src/domain";
 import { RateLimitError } from "../src/rate-limit";
-import { seedStore } from "../prisma/seed";
+import { demoProducts, seedStore } from "../prisma/seed";
 
 function socketEvent(socket: Socket, event: string) {
   return new Promise<void>((resolve, reject) => {
@@ -225,6 +226,313 @@ test(
       }
       await login("manager", slug, "manager@example.com");
       await login("other", other.store.slug, "manager@example.com");
+
+      await t.test(
+        "dashboard gerencial agrega todo o histórico com fuso, receitas e isolamento",
+        async () => {
+          const path = "staff/dashboard?from=2025-08-10&to=2025-08-10";
+          assert.equal((await api(path)).status, 401);
+          for (const role of ["attendant", "kitchen", "driver", "customer"]) {
+            assert.equal((await api(path, role)).status, 403);
+          }
+          for (const query of [
+            "",
+            "from=2025-02-30&to=2025-03-01",
+            "from=2025-08-11&to=2025-08-10",
+            "from=2024-01-01&to=2025-01-01",
+            "from=2025-08-10&to=2025-08-10&storeId=other",
+          ]) {
+            assert.equal(
+              (await api(`staff/dashboard?${query}`, "manager")).status,
+              400,
+            );
+          }
+          const orderIds: string[] = [];
+          const quoteIds: string[] = [];
+          const disabledDriver = await db.user.create({
+            data: {
+              storeId: main.store.id,
+              email: "disabled-metrics@example.com",
+              name: "Desabilitado",
+              phone: "5500000000000",
+              passwordHash,
+              role: "DRIVER",
+              enabled: false,
+              available: true,
+            },
+          });
+          await db.user.update({
+            where: { id: ids.driver2 },
+            data: { available: false },
+          });
+          const fixture = async (
+            options: {
+              count?: number;
+              channel?: string;
+              payment?: string;
+              status?: Prisma.OrderCreateManyInput["status"];
+              createdAt?: string;
+              closedAt?: string;
+              driverId?: string;
+              legacy?: boolean;
+              combo?: boolean;
+              otherStore?: boolean;
+              discount?: number;
+            } = {},
+          ) => {
+            const input = quoteSchema.parse({
+              ...draft,
+              cashTendered: null,
+              items: options.combo
+                ? [
+                    { ...draft.items[0], quantity: 1 },
+                    {
+                      kind: "COMBO",
+                      productId: "combo-dupla",
+                      quantity: options.legacy ? 2 : 3,
+                      note: "",
+                    },
+                  ]
+                : [{ ...draft.items[0], quantity: options.legacy ? 1 : 2 }],
+            });
+            const priced = price(
+              demoProducts,
+              input,
+              options.channel === "COUNTER" ? 0 : 700,
+              null,
+            );
+            const frozen = JSON.parse(JSON.stringify(priced));
+            if (options.legacy) delete frozen.pizzaQuantity;
+            const storeId = options.otherStore ? other.store.id : main.store.id;
+            const createdAt = new Date(
+              options.createdAt ?? "2025-08-10T03:00:00.000Z",
+            );
+            const closedAt = new Date(
+              options.closedAt ?? "2025-08-10T04:00:00.000Z",
+            );
+            const quotes: Prisma.QuoteCreateManyInput[] = [];
+            const orders: Prisma.OrderCreateManyInput[] = [];
+            const events: Prisma.OrderEventCreateManyInput[] = [];
+            for (let i = 0; i < (options.count ?? 1); i++) {
+              const quoteId = randomUUID(),
+                id = randomUUID();
+              quotes.push({
+                id: quoteId,
+                storeId,
+                userId: options.otherStore ? ids.other : ids.manager,
+                draft: input,
+                priced: frozen,
+                fingerprint: "0".repeat(64),
+                expiresAt: closedAt,
+                createdAt,
+              });
+              const status = options.status ?? "DELIVERED";
+              orders.push({
+                id,
+                storeId,
+                number: 10000 + orderIds.length,
+                quoteId,
+                status,
+                driverId: options.driverId,
+                mode: options.channel === "COUNTER" ? "PICKUP" : "DELIVERY",
+                channel: options.channel ?? "APP",
+                payment: options.payment ?? "CASH",
+                paymentRecorded: true,
+                customer: { name: "Métricas", phone: "5500000000000" },
+                note: "",
+                items: priced.items,
+                subtotal: priced.subtotal,
+                fee: priced.fee,
+                discount: options.discount ?? 0,
+                total: priced.total - (options.discount ?? 0),
+                driverFee: options.driverId ? 800 : 0,
+                createdAt,
+                updatedAt: options.legacy
+                  ? closedAt
+                  : new Date("2025-08-12T12:00:00Z"),
+              });
+              if (
+                !options.legacy &&
+                ["DELIVERED", "CANCELLED", "RETURNED"].includes(status)
+              ) {
+                events.push({
+                  orderId: id,
+                  version: 2,
+                  action:
+                    status === "DELIVERED"
+                      ? options.channel === "COUNTER"
+                        ? "pickup-complete"
+                        : "complete"
+                      : status === "CANCELLED"
+                        ? "cancel"
+                        : "return",
+                  data: {},
+                  createdAt: closedAt,
+                });
+              }
+              orderIds.push(id);
+              quoteIds.push(quoteId);
+            }
+            await db.quote.createMany({ data: quotes });
+            await db.order.createMany({ data: orders });
+            if (events.length) await db.orderEvent.createMany({ data: events });
+          };
+          try {
+            await fixture({ count: 101, driverId: ids.driver });
+            await fixture({
+              channel: "WHATSAPP",
+              payment: "PREPAID",
+              combo: true,
+              discount: 500,
+              driverId: ids.driver,
+            });
+            await fixture({
+              channel: "COUNTER",
+              payment: "CARD",
+              legacy: true,
+              createdAt: "2025-08-09T22:00:00Z",
+              closedAt: "2025-08-10T03:00:00Z",
+            });
+            await fixture({
+              channel: "COUNTER",
+              payment: "CARD",
+              legacy: true,
+              combo: true,
+            });
+            await fixture({ status: "CANCELLED" });
+            await fixture({
+              channel: "WHATSAPP",
+              status: "RETURNED",
+              driverId: ids.driver,
+            });
+            await fixture({
+              createdAt: "2025-08-10T02:59:59.999Z",
+              closedAt: "2025-08-10T02:59:59.999Z",
+            });
+            await fixture({
+              createdAt: "2025-08-11T03:00:00Z",
+              closedAt: "2025-08-11T03:00:00Z",
+            });
+            await fixture({ status: "NEW" });
+            await fixture({
+              status: "OUT_FOR_DELIVERY",
+              driverId: ids.driver,
+              createdAt: "2025-08-11T12:00:00Z",
+            });
+            await fixture({ otherStore: true });
+            const result = await ok(path, "manager");
+            assert.equal(result.receivedOrders, 106);
+            assert.equal(result.completedOrders, 104);
+            assert.equal(result.cancelledOrders, 1);
+            assert.equal(result.returnedOrders, 1);
+            assert.equal(result.pizzasSold, 208);
+            assert.equal(result.incompletePizzaOrders, 1);
+            assert.deepEqual(result.sales, {
+              subtotal: 1467500,
+              discounts: 500,
+              deliveryFees: 71400,
+              revenue: 1538400,
+              driverFees: 81600,
+              afterDriverFees: 1456800,
+              averageTicket: Math.round(1538400 / 104),
+            });
+            assert.deepEqual(result.channels, [
+              {
+                channel: "APP",
+                received: 103,
+                completed: 101,
+                revenue: 1484700,
+              },
+              {
+                channel: "WHATSAPP",
+                received: 2,
+                completed: 1,
+                revenue: 26700,
+              },
+              { channel: "COUNTER", received: 1, completed: 2, revenue: 27000 },
+            ]);
+            assert.deepEqual(
+              result.payments.map((p: any) => p.orders),
+              [101, 2, 1],
+            );
+            assert.deepEqual(result.timeline, [
+              {
+                date: "2025-08-10",
+                received: 106,
+                completed: 104,
+                revenue: 1538400,
+                pizzas: 208,
+              },
+            ]);
+            assert.equal(result.period.timeZone, "America/Sao_Paulo");
+            assert.equal(
+              result.operation.find((r: any) => r.status === "NEW").count,
+              1,
+            );
+            assert.equal(
+              result.operation.find((r: any) => r.status === "OUT_FOR_DELIVERY")
+                .count,
+              1,
+            );
+            assert.deepEqual(
+              Object.fromEntries(
+                Object.entries(result.drivers).filter(
+                  ([key]) => key !== "items",
+                ),
+              ),
+              {
+                total: 3,
+                enabled: 2,
+                available: 1,
+                paused: 1,
+                onRoute: 1,
+                free: 0,
+              },
+            );
+            const driver = result.drivers.items.find(
+              (d: any) => d.id === ids.driver,
+            );
+            assert.equal(driver.completed, 102);
+            assert.equal(driver.returned, 1);
+            assert.equal(driver.earnings, 81600);
+            assert.equal(driver.activeOrders, 1);
+            assert.equal(
+              JSON.stringify(result).includes("passwordHash"),
+              false,
+            );
+            const otherResult = await ok(path, "other");
+            assert.equal(otherResult.completedOrders, 1);
+            assert.equal(otherResult.drivers.total, 0);
+            const empty = await ok(
+              "staff/dashboard?from=2020-01-01&to=2020-01-02",
+              "manager",
+            );
+            assert.equal(empty.sales.revenue, 0);
+            assert.equal(empty.sales.averageTicket, 0);
+            assert.equal(empty.receivedOrders, 0);
+            assert.deepEqual(
+              empty.timeline.map((d: any) => d.revenue),
+              [0, 0],
+            );
+            assert.equal(
+              empty.drivers.onRoute,
+              1,
+              "balanço atual não depende do período histórico",
+            );
+          } finally {
+            await db.orderEvent.deleteMany({
+              where: { orderId: { in: orderIds } },
+            });
+            await db.order.deleteMany({ where: { id: { in: orderIds } } });
+            await db.quote.deleteMany({ where: { id: { in: quoteIds } } });
+            await db.user.delete({ where: { id: disabledDriver.id } });
+            await db.user.update({
+              where: { id: ids.driver2 },
+              data: { available: true },
+            });
+          }
+        },
+      );
 
       await t.test(
         "sacola com vários produtos cobra um frete e preserva complemento",
