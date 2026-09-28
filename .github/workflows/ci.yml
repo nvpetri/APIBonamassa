@@ -40,6 +40,11 @@ jobs:
         run: |
           npx --no-install prettier --write .
           git diff
+      - name: Instalar cliente PostgreSQL 17
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
       - name: Verify encrypted PostgreSQL backup and isolated restore
         env:
           BACKUP_DATABASE_URL: postgresql://bonamassa:ci-only-password@localhost:5432/bonamassa_test?sslmode=disable

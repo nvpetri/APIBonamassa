@@ -21,6 +21,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - name: Instalar cliente PostgreSQL 17
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
       - name: Gerar e criptografar cópia
         env:
           BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
