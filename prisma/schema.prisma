@@ -273,3 +273,37 @@ model StaffInvitation {
   createdAt DateTime @default(now())
   @@index([userId, createdAt])
 }
+
+// Append-only database audit; no FK so the trail survives deletion of a subject.
+model AuditTrail {
+  id BigInt @id @default(autoincrement())
+  storeId String @db.Uuid
+  tableName String @db.VarChar(60)
+  recordId String @db.VarChar(100)
+  operation String @db.VarChar(10)
+  actorId String? @db.Uuid
+  actorName String? @db.VarChar(80)
+  actorRole String? @db.VarChar(20)
+  sharedAccount Boolean @default(false)
+  origin String @db.VarChar(20)
+  clientSource String? @db.VarChar(40)
+  requestId String? @db.Uuid
+  sessionId String? @db.Uuid
+  action String? @db.VarChar(160)
+  method String? @db.VarChar(10)
+  path String? @db.VarChar(300)
+  ip String? @db.VarChar(100)
+  userAgent String? @db.VarChar(300)
+  keyHash String? @db.VarChar(64)
+  databaseUser String @db.VarChar(100)
+  transactionId String @db.VarChar(30)
+  changedFields String[]
+  before Json?
+  after Json?
+  createdAt DateTime @default(now())
+  @@index([storeId, id])
+  @@index([storeId, createdAt])
+  @@index([storeId, tableName, recordId, id])
+  @@index([storeId, actorId, id])
+  @@index([storeId, requestId])
+}

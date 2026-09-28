@@ -9,6 +9,7 @@ import { Db, Tx } from "./db";
 import { Change, ChangeBus } from "./realtime";
 import { operation } from "./schedule";
 import { config } from "./config";
+import { auditContext } from "./audit-context";
 
 @Injectable()
 export class SchedulingService implements OnModuleInit, OnModuleDestroy {
@@ -48,12 +49,21 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
     }
   }
   async reconcile(storeId: string) {
-    const result = await this.db.write(storeId, async (tx) => {
-      const store = await tx.store.findUniqueOrThrow({
-        where: { id: storeId },
-      });
-      return this.sync(tx, store);
-    });
+    const result = await auditContext.run(
+      {
+        ...auditContext.getStore(),
+        origin: "SYSTEM",
+        actor: undefined,
+        action: "schedule.reconcile",
+      },
+      () =>
+        this.db.write(storeId, async (tx) => {
+          const store = await tx.store.findUniqueOrThrow({
+            where: { id: storeId },
+          });
+          return this.sync(tx, store);
+        }),
+    );
     for (const event of result.events) this.bus.publish(event);
     return result.store;
   }

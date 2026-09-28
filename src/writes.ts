@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
+import { auditContext, auditIdentity } from "./audit-context";
 import { AuthService, Actor } from "./auth";
 import { Db, Tx, digest, json } from "./db";
 import { Change, ChangeBus } from "./realtime";
@@ -26,6 +27,9 @@ export class Writes {
     execute: (tx: Tx) => Promise<{ data: T; events?: Change[] }>,
   ): Promise<T> {
     keySchema.parse(key);
+    auditIdentity(actor);
+    const context = auditContext.getStore();
+    if (context) context.action = scope;
     const fingerprint = digest({ scope, body });
     const result = await this.db.write(actor.storeId, async (tx) => {
       await this.auth.assert(tx, actor);

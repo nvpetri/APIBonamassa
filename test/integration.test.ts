@@ -230,6 +230,176 @@ test(
       await login("other", other.store.slug, "manager@example.com");
 
       await t.test(
+        "auditoria transacional rastreia contas, SQL, segredos e isolamento",
+        async () => {
+          const range = new URLSearchParams({
+            from: new Date(Date.now() - 86400000).toISOString(),
+            to: new Date(Date.now() + 86400000).toISOString(),
+          });
+          const path = `staff/audit?${range}`;
+          assert.equal((await api(path)).status, 401);
+          for (const role of ["attendant", "kitchen", "driver", "customer"])
+            assert.equal((await api(path, role)).status, 403);
+          assert.equal(
+            (await api(`${path}&storeId=${other.store.id}`, "manager")).status,
+            400,
+          );
+          assert.equal(
+            (await api(`${path}&cursor=99999999999999999999`, "manager"))
+              .status,
+            400,
+          );
+          const o = await order();
+          let current = o;
+          try {
+            const key = randomUUID();
+            const before = await db.auditTrail.count({
+              where: { tableName: "Order", recordId: o.id },
+            });
+            current = await cmd(o, "accept", "attendant", {}, key);
+            await cmd(o, "accept", "attendant", {}, key);
+            assert.equal(
+              await db.auditTrail.count({
+                where: { tableName: "Order", recordId: o.id },
+              }),
+              before + 1,
+              "replay must not duplicate committed changes",
+            );
+            const response = await api(
+              `staff/orders/${o.id}/prepare`,
+              "kitchen",
+              "POST",
+              { expectedVersion: current.version },
+            );
+            assert.equal(response.status, 200);
+            current = response.data;
+            const list = await ok(
+              `${path}&table=Order&recordId=${o.id}&limit=1`,
+              "manager",
+            );
+            assert.equal(list.items.length, 1);
+            assert.ok(list.nextCursor);
+            const row = list.items[0];
+            assert.equal(row.actorId, ids.kitchen);
+            assert.equal(row.actorName, "kitchen");
+            assert.equal(row.sharedAccount, true);
+            assert.equal(row.actorRole, "KITCHEN");
+            assert.equal(row.origin, "HTTP");
+            assert.equal(row.requestId, response.headers.get("x-request-id"));
+            assert.ok(row.changedFields.includes("status"));
+            const detail = await ok(`staff/audit/${row.id}`, "manager");
+            assert.equal(detail.before.status, "CONFIRMED");
+            assert.equal(detail.after.status, "PREPARING");
+            assert.equal(detail.after.customer, "[REDACTED]");
+            assert.equal(detail.after.address, "[REDACTED]");
+            assert.equal(detail.after.items[0].note, "[REDACTED]");
+            assert.ok(detail.databaseUser);
+            assert.ok(detail.transactionId);
+            assert.ok(detail.keyHash);
+            assert.equal(
+              (await api(`staff/audit/${row.id}`, "other")).status,
+              404,
+            );
+            assert.equal(
+              (await api(`staff/audit/${row.id}`, "attendant")).status,
+              403,
+            );
+            const next = await ok(
+              `${path}&table=Order&recordId=${o.id}&limit=1&cursor=${list.nextCursor}`,
+              "manager",
+            );
+            assert.notEqual(next.items[0].id, row.id);
+            assert.equal(
+              (
+                await ok(`${path}&requestId=${row.requestId}`, "manager")
+              ).items.every((r: any) => r.requestId === row.requestId),
+              true,
+            );
+            await assert.rejects(
+              db.auditTrail.update({
+                where: { id: BigInt(row.id) },
+                data: { actorName: "tampered" },
+              }),
+            );
+            await assert.rejects(
+              db.auditTrail.delete({ where: { id: BigInt(row.id) } }),
+            );
+            await assert.rejects(db.$executeRawUnsafe('TRUNCATE "AuditTrail"'));
+          } finally {
+            await db.orderEvent.deleteMany({ where: { orderId: o.id } });
+            const savedOrder = await db.order.findUniqueOrThrow({
+              where: { id: o.id },
+            });
+            await db.order.delete({ where: { id: o.id } });
+            await db.quote.delete({ where: { id: savedOrder.quoteId } });
+          }
+          const id = randomUUID();
+          await assert.rejects(
+            db.$transaction(async (tx) => {
+              await tx.user.create({
+                data: {
+                  id,
+                  storeId: main.store.id,
+                  email: `${id}@example.com`,
+                  name: "Rollback",
+                  phone: "11999999999",
+                  passwordHash,
+                  role: "DRIVER",
+                },
+              });
+              throw new Error("rollback");
+            }),
+          );
+          assert.equal(
+            await db.auditTrail.count({
+              where: { tableName: "User", recordId: id },
+            }),
+            0,
+          );
+          await db.user.create({
+            data: {
+              id,
+              storeId: main.store.id,
+              email: `${id}@example.com`,
+              name: "SQL test",
+              phone: "11999999999",
+              passwordHash,
+              role: "DRIVER",
+            },
+          });
+          await db.session.create({
+            data: {
+              userId: id,
+              tokenHash: tokenHash(randomUUID()),
+              expiresAt: new Date(Date.now() + 10000),
+            },
+          });
+          await db.user.update({
+            where: { id },
+            data: { name: "SQL renamed" },
+          });
+          await db.user.delete({ where: { id } });
+          const raw = await db.auditTrail.findMany({
+            where: { tableName: "User", recordId: id },
+            orderBy: { id: "asc" },
+          });
+          assert.deepEqual(
+            raw.map((r) => r.operation),
+            ["INSERT", "UPDATE", "DELETE"],
+          );
+          assert.equal(
+            raw.every((r) => r.actorId === null && r.origin === "SQL"),
+            true,
+            "pooled connection must not inherit a previous HTTP actor",
+          );
+          assert.equal((raw[0].after as any).passwordHash, "[REDACTED]");
+          assert.equal((raw[0].after as any).email, "[REDACTED]");
+          assert.equal((raw[1].before as any).name, "SQL test");
+          assert.equal((raw[1].after as any).name, "SQL renamed");
+        },
+      );
+
+      await t.test(
         "dashboard gerencial agrega todo o histórico com fuso, receitas e isolamento",
         async () => {
           const path = "staff/dashboard?from=2025-08-10&to=2025-08-10";

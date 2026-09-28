@@ -1,3 +1,4 @@
+import { applyAuditContext } from "./audit-context";
 import { Injectable } from "@nestjs/common";
 import { User } from "@prisma/client";
 import { randomBytes } from "node:crypto";
@@ -88,10 +89,12 @@ export class InvitationsService {
         url.toString(),
         delivery.id,
       );
-      await this.db.staffInvitation.updateMany({
-        where: { id: delivery.id, consumedAt: null },
-        data: { sentAt: new Date() },
-      });
+      await this.db.write(delivery.user.storeId, (tx) =>
+        tx.staffInvitation.updateMany({
+          where: { id: delivery.id, consumedAt: null },
+          data: { sentAt: new Date() },
+        }),
+      );
     } catch {
       // The account is persisted. A manager can retry with a new invitation; never claim delivery on a timeout.
       console.warn(
@@ -156,6 +159,7 @@ export class InvitationsService {
         "Convite inválido, expirado ou já utilizado. Peça ao gerente um novo convite.",
         410,
       );
+      await applyAuditContext(tx, invite.user.storeId, invite.user);
       await tx.staffInvitation.updateMany({
         where: { userId: invite.userId, consumedAt: null },
         data: { consumedAt: new Date() },

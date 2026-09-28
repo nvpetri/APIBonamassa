@@ -10,6 +10,7 @@ import { Role, User, VerificationPurpose } from "@prisma/client";
 import { randomBytes, randomInt } from "node:crypto";
 import { Request, Response } from "express";
 import { z } from "zod";
+import { auditIdentity, applyAuditContext } from "./audit-context";
 import { Db, Tx, json, tokenHash } from "./db";
 import { config } from "./config";
 import { ensure, loginSchema, registerSchema, RuleError } from "./domain";
@@ -111,6 +112,7 @@ export class AuthService {
     const upgradedHash = needsPasswordUpgrade(user.passwordHash)
       ? await hashPassword(input.password)
       : null;
+    auditIdentity(user);
     return this.db.write(user.storeId, async (tx) => {
       const current = await tx.user.findUniqueOrThrow({
         where: { id: user.id },
@@ -267,6 +269,7 @@ export class AuthService {
         });
       return false;
     }
+    await applyAuditContext(tx, user.storeId, user);
     await tx.verificationCode.update({
       where: { id: record.id },
       data: { consumedAt: new Date() },
@@ -482,6 +485,7 @@ export class AccessGuard implements CanActivate {
         401,
       );
     req.actor = await this.auth.authenticate(header.slice(7));
+    auditIdentity(req.actor);
     // Separate authenticated staff/customers even behind the same BFF/NAT.
     // Using user identity instead of token prevents bypass by creating sessions.
     await this.auth.rate(

@@ -2,6 +2,9 @@ import "reflect-metadata";
 import { Module } from "@nestjs/common";
 import { APP_GUARD, NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
+import { auditContext } from "./audit-context";
+import { tokenHash } from "./db";
+import { AuditTrailService } from "./audit-trail";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import helmet from "helmet";
@@ -33,6 +36,7 @@ import { AnalyticsService } from "./analytics";
     SchedulingService,
     Mailer,
     AnalyticsService,
+    AuditTrailService,
     InvitationsService,
     { provide: APP_GUARD, useClass: AccessGuard },
   ],
@@ -58,7 +62,25 @@ export async function createApp(quiet = false) {
       req.requestId = randomUUID();
       res.setHeader("X-Request-Id", req.requestId);
       res.setHeader("Cache-Control", "no-store");
-      next();
+      auditContext.run(
+        {
+          origin: "HTTP",
+          requestId: req.requestId,
+          method: req.method,
+          path: req.path.slice(0, 300),
+          ip: req.ip?.slice(0, 100),
+          userAgent: req.get("user-agent")?.slice(0, 300),
+          clientSource: ["PANEL", "CUSTOMER_APP", "DRIVER_APP"].includes(
+            req.get("x-client-source") || "",
+          )
+            ? req.get("x-client-source")
+            : "UNSPECIFIED",
+          keyHash: req.get("idempotency-key")
+            ? tokenHash(req.get("idempotency-key")!)
+            : undefined,
+        },
+        next,
+      );
     },
   );
   app.use(helmet());
@@ -66,7 +88,12 @@ export async function createApp(quiet = false) {
   app.enableCors({
     origin: env.origins,
     credentials: false,
-    allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+    allowedHeaders: [
+      "Content-Type",
+      "Authorization",
+      "Idempotency-Key",
+      "X-Client-Source",
+    ],
     exposedHeaders: ["X-Request-Id", "X-Session-Expires-At"],
     methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
   });

@@ -42,3 +42,5 @@ Um check verde significa apenas que aquilo que ele verifica passou. Uma variáve
 Definir quem é dono das contas de nuvem/domínio e escolher o endereço definitivo da API. Manter a demonstração separada enquanto o ambiente de produção é montado. Não é necessário comprar domínio para testar o sistema: o HTTPS do provedor pode ser usado, mas o endereço precisa ser estável antes de distribuir os APKs.
 
 Para reduzir consumo em testes, veja [Operação econômica no Neon Free](08-NEON-FREE.md), incluindo cache, scanner configurável e ativação de backup criptografado.
+
+[Auditoria das gravações](09-AUDITORIA.md): cobertura, campos protegidos, consulta pelo gerente, atribuição de contas compartilhadas e limites da proteção no banco.

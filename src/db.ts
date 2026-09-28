@@ -1,6 +1,7 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { Prisma, PrismaClient } from "@prisma/client";
 import { createHash } from "node:crypto";
+import { applyAuditContext } from "./audit-context";
 
 export type Tx = Prisma.TransactionClient;
 export const json = (value: unknown): Prisma.InputJsonValue =>
@@ -39,6 +40,7 @@ export class Db extends PrismaClient implements OnModuleInit, OnModuleDestroy {
     return this.$transaction(
       async (tx) => {
         await lockStore(tx, storeId);
+        await applyAuditContext(tx, storeId);
         return run(tx);
       },
       {

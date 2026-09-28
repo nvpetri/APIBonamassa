@@ -1,3 +1,4 @@
+import { AuditTrailService, auditId, auditQuery } from "./audit-trail";
 import { InvitationsService } from "./invitations";
 import {
   Body,
@@ -69,6 +70,7 @@ export class ApiController {
     private readonly db: Db,
     private readonly analytics: AnalyticsService,
     private readonly invitations: InvitationsService,
+    private readonly auditTrail: AuditTrailService,
   ) {}
 
   @Get("health")
@@ -219,6 +221,20 @@ export class ApiController {
   @ApiTags("Gestão do cardápio")
   staffCatalog(@Current() actor: Actor) {
     return this.catalogService.staffCatalog(actor);
+  }
+
+  @Get("staff/audit")
+  @Roles("MANAGER")
+  @ApiTags("Auditoria")
+  auditList(@Current() actor: Actor, @Query() query: unknown) {
+    return this.auditTrail.list(actor, auditQuery.parse(query));
+  }
+
+  @Get("staff/audit/:id")
+  @Roles("MANAGER")
+  @ApiTags("Auditoria")
+  auditDetail(@Current() actor: Actor, @Param("id") id: string) {
+    return this.auditTrail.detail(actor, auditId.parse(id));
   }
 
   @Get("staff/dashboard")
