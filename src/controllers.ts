@@ -1,3 +1,4 @@
+import { InvitationsService } from "./invitations";
 import {
   Body,
   Controller,
@@ -45,6 +46,8 @@ import {
   registerSchema,
   slugSchema,
   staffSchema,
+  inviteSchema,
+  acceptInviteSchema,
   startRouteSchema,
   storeSchema,
   uuid,
@@ -65,6 +68,7 @@ export class ApiController {
     private readonly staff: StaffService,
     private readonly db: Db,
     private readonly analytics: AnalyticsService,
+    private readonly invitations: InvitationsService,
   ) {}
 
   @Get("health")
@@ -90,6 +94,24 @@ export class ApiController {
   @ApiTags("Sessão")
   register(@Body() body: unknown) {
     return this.auth.register(registerSchema.parse(body));
+  }
+
+  @Post("auth/staff-invitations/inspect")
+  @HttpCode(200)
+  @Public()
+  @BodyDoc(inviteSchema)
+  @ApiTags("Convites")
+  inspectInvitation(@Body() body: unknown) {
+    return this.invitations.inspect(inviteSchema.parse(body).token);
+  }
+
+  @Post("auth/staff-invitations/accept")
+  @HttpCode(200)
+  @Public()
+  @BodyDoc(acceptInviteSchema)
+  @ApiTags("Convites")
+  acceptInvitation(@Body() body: unknown) {
+    return this.invitations.accept(acceptInviteSchema.parse(body));
   }
 
   @Post("auth/email-verification/request")
@@ -356,6 +378,22 @@ export class ApiController {
       actor,
       keySchema.parse(key),
       staffSchema.parse(body),
+    );
+  }
+
+  @Post("staff/users/:id/invite")
+  @Roles("MANAGER")
+  @Mutation()
+  @ApiTags("Equipe")
+  resendInvitation(
+    @Current() actor: Actor,
+    @Headers("idempotency-key") key: string,
+    @Param("id") id: string,
+  ) {
+    return this.staff.resendInvitation(
+      actor,
+      keySchema.parse(key),
+      uuid.parse(id),
     );
   }
 

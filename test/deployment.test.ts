@@ -103,3 +103,24 @@ test("Retry-After usa a janela real e nunca é zero", () => {
   assert.equal(retryAfterSeconds(new Date(0), 1000), 1);
   assert.equal(new RateLimitError(60).status, 429);
 });
+
+test("convites aceitam somente links públicos seguros em produção", () => {
+  assert.equal(
+    config({
+      ...production,
+      STAFF_INVITE_URL: "https://painel.example.com/convite",
+    }).STAFF_INVITE_URL,
+    "https://painel.example.com/convite",
+  );
+  for (const value of [
+    "http://painel.example.com/convite",
+    "https://user:secret@painel.example.com/convite",
+    "https://painel.example.com/convite?token=a",
+    "https://painel.example.com/convite#token=a",
+  ]) {
+    assert.throws(
+      () => config({ ...production, STAFF_INVITE_URL: value }),
+      /STAFF_INVITE_URL/,
+    );
+  }
+});

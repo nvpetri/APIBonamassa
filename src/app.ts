@@ -17,6 +17,7 @@ import { StaffService } from "./staff";
 import { Writes } from "./writes";
 import { SchedulingService } from "./scheduling";
 import { Mailer } from "./mailer";
+import { InvitationsService } from "./invitations";
 import { AnalyticsService } from "./analytics";
 
 @Module({
@@ -32,6 +33,7 @@ import { AnalyticsService } from "./analytics";
     SchedulingService,
     Mailer,
     AnalyticsService,
+    InvitationsService,
     { provide: APP_GUARD, useClass: AccessGuard },
   ],
 })

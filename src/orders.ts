@@ -558,6 +558,7 @@ export class OrdersService {
               id: command.driverId,
               storeId: actor.storeId,
               role: "DRIVER",
+              onboardingPending: false,
               enabled: true,
               available: true,
             },

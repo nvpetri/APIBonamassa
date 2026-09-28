@@ -14,6 +14,7 @@ export function config(env: NodeJS.ProcessEnv = process.env) {
       DOCS_ENABLED: z.enum(["true", "false"]).default("false"),
       SESSION_IDLE_DAYS: z.coerce.number().int().min(1).max(30).default(5),
       CUSTOMER_REGISTRATION_ENABLED: z.enum(["true", "false"]).default("true"),
+      STAFF_INVITE_URL: z.string().url().optional(),
       EMAIL_API_KEY: z.string().min(1).optional(),
       EMAIL_FROM: z
         .string()
@@ -40,6 +41,21 @@ export function config(env: NodeJS.ProcessEnv = process.env) {
     )
       throw new Error(
         "CORS_ORIGINS deve conter origens explícitas, HTTPS em produção.",
+      );
+  }
+  if (e.STAFF_INVITE_URL) {
+    const url = new URL(e.STAFF_INVITE_URL);
+    if (
+      !["http:", "https:"].includes(url.protocol) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      ((deploy.strict || e.NODE_ENV === "production") &&
+        url.protocol !== "https:")
+    )
+      throw new Error(
+        "STAFF_INVITE_URL deve ser a URL pública da página /convite, HTTPS em produção, sem credenciais, query ou fragmento.",
       );
   }
   return { ...e, origins, ...deploy };

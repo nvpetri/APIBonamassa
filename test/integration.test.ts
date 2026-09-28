@@ -5,6 +5,7 @@ import { Prisma, PrismaClient, Role } from "@prisma/client";
 import { io, Socket } from "socket.io-client";
 import sharp from "sharp";
 import { createApp } from "../src/app";
+import { Mailer } from "../src/mailer";
 import { AuthService, hashPassword } from "../src/auth";
 import { tokenHash } from "../src/db";
 import { price, quoteSchema } from "../src/domain";
@@ -48,6 +49,7 @@ test(
     process.env.CUSTOMER_REGISTRATION_ENABLED = "true";
     process.env.DOCS_ENABLED = "true";
     process.env.CORS_ORIGINS = "http://localhost:3000";
+    process.env.STAFF_INVITE_URL = "http://localhost:3000/convite";
     const db = new PrismaClient();
     const slug = `test-${randomUUID().slice(0, 8)}`;
     const password = `Test-${randomUUID()}`;
@@ -2050,14 +2052,106 @@ test(
       await t.test(
         "gestor cadastra e revoga equipe; senha não aparece na resposta",
         async () => {
-          const created = await ok("staff/users", "manager", "POST", {
-            email: "new-kitchen@example.com",
-            password,
-            name: "Nova cozinha",
-            phone: "5500000000000",
-            role: "KITCHEN",
+          await db.rateBucket.deleteMany({
+            where: { key: tokenHash("http:auth:127.0.0.1") },
           });
+          const mailed = new Map<string, string>();
+          let failEmail = "";
+          const mailer = app.get(Mailer);
+          mailer.invitation = async (email, _name, _store, _role, link) => {
+            if (email === failEmail)
+              throw new Error("Simulated provider timeout");
+            mailed.set(
+              email,
+              new URLSearchParams(new URL(link).hash.slice(1)).get("token")!,
+            );
+          };
+          const input = {
+            email: "new-kitchen@example.com",
+            name: "Nova cozinha",
+            role: "KITCHEN",
+          };
+          assert.equal(
+            (await api("staff/users", "attendant", "POST", input)).status,
+            403,
+          );
+          assert.equal(
+            (
+              await api("staff/users", "manager", "POST", {
+                ...input,
+                password,
+                phone: "11999999999",
+              })
+            ).status,
+            400,
+          );
+          const key = randomUUID();
+          const created = await ok(
+            "staff/users",
+            "manager",
+            "POST",
+            input,
+            key,
+          );
+          const firstToken = mailed.get(created.email)!;
+          assert.match(firstToken, /^[A-Za-z0-9_-]{43}$/);
+          assert.equal(created.onboardingPending, true);
+          assert.equal(created.invitationStatus, "SENT");
           assert.equal(created.passwordHash, undefined);
+          const repeated = await ok(
+            "staff/users",
+            "manager",
+            "POST",
+            input,
+            key,
+          );
+          assert.equal(repeated.id, created.id);
+          assert.equal(
+            await db.staffInvitation.count({ where: { userId: created.id } }),
+            1,
+          );
+          assert.equal(JSON.stringify(repeated).includes(firstToken), false);
+          const saved = await db.staffInvitation.findFirstOrThrow({
+            where: { userId: created.id },
+          });
+          assert.equal(saved.tokenHash, tokenHash(firstToken));
+          const inspected = await ok(
+            "auth/staff-invitations/inspect",
+            undefined,
+            "POST",
+            { token: firstToken },
+          );
+          assert.equal(inspected.role, "KITCHEN");
+          assert.equal(
+            (
+              await db.staffInvitation.findUniqueOrThrow({
+                where: { id: saved.id },
+              })
+            ).consumedAt,
+            null,
+          );
+          await ok("auth/email-verification/request", undefined, "POST", {
+            storeSlug: slug,
+            email: created.email,
+          });
+          await ok("auth/password-reset/request", undefined, "POST", {
+            storeSlug: slug,
+            email: created.email,
+          });
+          assert.equal(
+            await db.verificationCode.count({ where: { userId: created.id } }),
+            0,
+          );
+          assert.equal(
+            (
+              await api("auth/email-verification/confirm", undefined, "POST", {
+                storeSlug: slug,
+                email: created.email,
+                code: "123456",
+              })
+            ).status,
+            400,
+          );
           assert.equal(
             (
               await api("sessions", undefined, "POST", {
@@ -2066,21 +2160,85 @@ test(
                 password,
               })
             ).status,
-            403,
+            401,
           );
-          await db.user.update({
-            where: { id: created.id },
-            data: { emailVerifiedAt: new Date() },
+          assert.equal(
+            (await api(`staff/users/${created.id}/invite`, "other", "POST", {}))
+              .status,
+            404,
+          );
+          await db.staffInvitation.update({
+            where: { id: saved.id },
+            data: { expiresAt: new Date(Date.now() - 1) },
           });
+          assert.equal(
+            (
+              await api("auth/staff-invitations/accept", undefined, "POST", {
+                token: firstToken,
+                password,
+              })
+            ).status,
+            410,
+          );
+          const resent = await ok(
+            `staff/users/${created.id}/invite`,
+            "manager",
+            "POST",
+            {},
+          );
+          assert.equal(resent.invitationStatus, "SENT");
+          const nextToken = mailed.get(created.email)!;
+          assert.notEqual(nextToken, firstToken);
+          assert.equal(
+            (
+              await api("auth/staff-invitations/inspect", undefined, "POST", {
+                token: firstToken,
+              })
+            ).status,
+            410,
+          );
+          assert.equal(
+            (
+              await api("auth/staff-invitations/accept", undefined, "POST", {
+                token: nextToken,
+                password,
+                role: "MANAGER",
+              })
+            ).status,
+            400,
+          );
+          const accepted = await Promise.all(
+            [1, 2].map(() =>
+              api("auth/staff-invitations/accept", undefined, "POST", {
+                token: nextToken,
+                password,
+              }),
+            ),
+          );
+          assert.deepEqual(accepted.map((r) => r.status).sort(), [200, 410]);
           const session = await ok("sessions", undefined, "POST", {
             storeSlug: slug,
             email: created.email,
             password,
           });
+          assert.equal(session.user.emailVerified, true);
+          assert.equal(session.user.phone, "");
+          assert.equal(session.user.role, "KITCHEN");
+          assert.equal(session.user.onboardingPending, false);
           tokens.newKitchen = session.accessToken;
+          const session2 = await ok("sessions", undefined, "POST", {
+            storeSlug: slug,
+            email: created.email,
+            password,
+          });
+          assert.notEqual(
+            session.accessToken,
+            session2.accessToken,
+            "conta do setor permite sessões compartilhadas independentes",
+          );
           await ok(`staff/users/${created.id}`, "manager", "PATCH", {
             enabled: false,
-            expectedVersion: created.version,
+            expectedVersion: session.user.version,
           });
           assert.equal((await api("me", "newKitchen")).status, 401);
           assert.equal(
@@ -2091,6 +2249,99 @@ test(
               })
             ).status,
             422,
+          );
+          const driver = await ok("staff/users", "manager", "POST", {
+            name: "Convidado",
+            role: "DRIVER",
+            email: "invited-driver@example.com",
+          });
+          const driverToken = mailed.get(driver.email)!;
+          assert.equal(
+            (await ok("staff/drivers", "manager")).some(
+              (d: any) => d.id === driver.id,
+            ),
+            false,
+          );
+          const readyOrder = await ready(await order());
+          assert.equal(
+            (
+              await api(
+                `staff/orders/${readyOrder.id}/assign`,
+                "manager",
+                "POST",
+                { expectedVersion: readyOrder.version, driverId: driver.id },
+              )
+            ).status,
+            409,
+          );
+          assert.equal(
+            (
+              await api("auth/staff-invitations/accept", undefined, "POST", {
+                token: driverToken,
+                password,
+              })
+            ).status,
+            400,
+          );
+          await ok(`staff/users/${driver.id}`, "manager", "PATCH", {
+            expectedVersion: driver.version,
+            enabled: false,
+          });
+          assert.equal(
+            (
+              await api("auth/staff-invitations/accept", undefined, "POST", {
+                token: driverToken,
+                password,
+                phone: "11933334444",
+              })
+            ).status,
+            410,
+          );
+          await ok(`staff/users/${driver.id}`, "manager", "PATCH", {
+            expectedVersion: driver.version + 1,
+            enabled: true,
+          });
+          assert.equal(
+            (
+              await api("auth/staff-invitations/inspect", undefined, "POST", {
+                token: driverToken,
+              })
+            ).status,
+            410,
+          );
+          await ok(`staff/users/${driver.id}/invite`, "manager", "POST", {});
+          await ok("auth/staff-invitations/accept", undefined, "POST", {
+            token: mailed.get(driver.email),
+            password,
+            phone: "11933334444",
+          });
+          assert.equal(
+            (await ok("staff/drivers", "manager")).some(
+              (d: any) => d.id === driver.id,
+            ),
+            true,
+          );
+          failEmail = "failed-invite@example.com";
+          const failed = await ok("staff/users", "manager", "POST", {
+            name: "Balcão",
+            role: "ATTENDANT",
+            email: failEmail,
+          });
+          assert.equal(failed.invitationStatus, "PENDING");
+          assert.equal(failed.onboardingPending, true);
+          failEmail = "";
+          const recovered = await ok(
+            `staff/users/${failed.id}/invite`,
+            "manager",
+            "POST",
+            {},
+          );
+          assert.equal(recovered.invitationStatus, "SENT");
+          assert.equal(
+            await db.user.count({
+              where: { storeId: main.store.id, email: failed.email },
+            }),
+            1,
           );
           const result = await ok("me/password", "customer2", "POST", {
             currentPassword: password,

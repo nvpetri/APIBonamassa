@@ -482,10 +482,15 @@ export const registerSchema = z.strictObject({
 });
 export const staffSchema = z.strictObject({
   email: emailSchema,
-  password: passwordSchema,
   name: shortText(80),
-  phone: phoneSchema,
   role: z.enum(["MANAGER", "ATTENDANT", "KITCHEN", "DRIVER"]),
+});
+export const inviteSchema = z.strictObject({
+  token: z.string().regex(/^[A-Za-z0-9_-]{43}$/),
+});
+export const acceptInviteSchema = inviteSchema.extend({
+  password: passwordSchema,
+  phone: z.union([phoneSchema, z.literal("")]).default(""),
 });
 export const editUserSchema = actionSchema.extend({ enabled: z.boolean() });
 export const changePasswordSchema = z.strictObject({

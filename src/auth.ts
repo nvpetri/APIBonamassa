@@ -39,6 +39,7 @@ export const userDto = (u: User) => ({
   available: u.available,
   version: u.version,
   emailVerified: !!u.emailVerifiedAt,
+  onboardingPending: u.onboardingPending,
   storeId: u.storeId,
 });
 export const Public = () => SetMetadata("public", true);
@@ -67,7 +68,7 @@ export class AuthService {
   }
   async issue(user: User, tx: Tx = this.db) {
     ensure(
-      user.emailVerifiedAt,
+      user.emailVerifiedAt && !user.onboardingPending,
       "EMAIL_NOT_VERIFIED",
       "Confirme seu e-mail para continuar.",
       403,
@@ -102,7 +103,7 @@ export class AuthService {
       401,
     );
     ensure(
-      user.emailVerifiedAt,
+      user.emailVerifiedAt && !user.onboardingPending,
       "EMAIL_NOT_VERIFIED",
       "Confirme seu e-mail para entrar.",
       403,
@@ -206,7 +207,7 @@ export class AuthService {
   async requestEmailVerification(storeSlug: string, email: string) {
     await this.rate(`verify-request:${storeSlug}:${email}`, 3, 3600);
     const user = await this.userByEmail(storeSlug, email);
-    if (user?.enabled && !user.emailVerifiedAt)
+    if (user?.enabled && !user.onboardingPending && !user.emailVerifiedAt)
       await this.sendCode(user, "EMAIL_VERIFY");
     return { accepted: true };
   }
@@ -216,7 +217,12 @@ export class AuthService {
     ensure(user?.enabled, "INVALID_CODE", "Código inválido ou expirado.", 400);
     const session = await this.db.write(user.storeId, async (tx) => {
       const current = await tx.user.findUnique({ where: { id: user.id } });
-      if (!current?.enabled || current.emailVerifiedAt) return null;
+      if (
+        !current?.enabled ||
+        current.onboardingPending ||
+        current.emailVerifiedAt
+      )
+        return null;
       if (!(await this.consumeCode(tx, current, "EMAIL_VERIFY", code)))
         return null;
       const verified = await tx.user.update({
@@ -270,7 +276,8 @@ export class AuthService {
   async requestPasswordReset(storeSlug: string, email: string) {
     await this.rate(`reset-request:${storeSlug}:${email}`, 3, 3600);
     const user = await this.userByEmail(storeSlug, email);
-    if (user?.enabled) await this.sendCode(user, "PASSWORD_RESET");
+    if (user?.enabled && !user.onboardingPending)
+      await this.sendCode(user, "PASSWORD_RESET");
     return { accepted: true };
   }
   async resetPassword(
@@ -285,7 +292,7 @@ export class AuthService {
     const passwordHash = await hashPassword(next);
     const sessions = await this.db.write(user.storeId, async (tx) => {
       const current = await tx.user.findUnique({ where: { id: user.id } });
-      if (!current?.enabled) return null;
+      if (!current?.enabled || current.onboardingPending) return null;
       if (!(await this.consumeCode(tx, current, "PASSWORD_RESET", code)))
         return null;
       const sessions = await tx.session.findMany({
@@ -338,7 +345,8 @@ export class AuthService {
       session &&
         session.expiresAt > now &&
         session.lastActivityAt > idleCutoff &&
-        session.user.enabled,
+        session.user.enabled &&
+        !session.user.onboardingPending,
       "SESSION_EXPIRED",
       "Sessão expirada ou revogada.",
       401,
@@ -376,6 +384,7 @@ export class AuthService {
         s.lastActivityAt >
           new Date(Date.now() - config().SESSION_IDLE_DAYS * 86_400_000) &&
         s.user.enabled &&
+        !s.user.onboardingPending &&
         s.user.role === actor.role &&
         s.userId === actor.id &&
         s.user.storeId === actor.storeId,

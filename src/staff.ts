@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { z } from "zod";
-import { Actor, AuthService, hashPassword, userDto } from "./auth";
+import { Actor, AuthService, userDto } from "./auth";
+import { InvitationsService, InvitationDelivery } from "./invitations";
 import { Db } from "./db";
 import {
   availabilitySchema,
@@ -18,6 +19,7 @@ export class StaffService {
     private readonly writes: Writes,
     private readonly bus: ChangeBus,
     private readonly auth: AuthService,
+    private readonly invitations: InvitationsService,
   ) {}
   async me(actor: Actor) {
     return userDto(
@@ -29,21 +31,20 @@ export class StaffService {
       await this.db.user.findMany({
         where: { storeId: actor.storeId, role: { not: "CUSTOMER" } },
         orderBy: { name: "asc" },
+        include: { invitations: { orderBy: { createdAt: "desc" }, take: 1 } },
         take: 100,
       })
-    ).map(userDto);
+    ).map((user) => this.invitations.dto(user));
   }
   async create(actor: Actor, key: string, input: z.infer<typeof staffSchema>) {
     await this.auth.rate(`staff-create:${actor.id}`, 10, 60);
-    const passwordHash = await hashPassword(input.password);
-    // Hash (not plaintext) contributes to request fingerprint; salt is excluded to keep retries stable.
-    const { password: _password, ...publicData } = input;
-    const { tokenHash } = await import("./db");
-    return this.writes.run(
+    this.invitations.configured();
+    let delivery: InvitationDelivery | undefined;
+    const result = await this.writes.run(
       actor,
       key,
       "staff:new",
-      { ...publicData, passwordDigest: tokenHash(input.password) },
+      input,
       async (tx) => {
         ensure(
           (await tx.user.count({
@@ -53,8 +54,16 @@ export class StaffService {
           "Limite de 100 funcionários atingido.",
         );
         const user = await tx.user.create({
-          data: { ...publicData, storeId: actor.storeId, passwordHash },
+          data: {
+            ...input,
+            storeId: actor.storeId,
+            passwordHash: "!INVITED",
+            phone: "",
+            onboardingPending: true,
+            available: false,
+          },
         });
+        delivery = await this.invitations.prepare(tx, user);
         await audit(tx, actor, "staff.created", {
           userId: user.id,
           role: user.role,
@@ -62,6 +71,37 @@ export class StaffService {
         return { data: userDto(user) };
       },
     );
+    if (delivery) await this.invitations.deliver(delivery);
+    return this.invitationUser(actor, result.id);
+  }
+  private async invitationUser(actor: Actor, id: string) {
+    const user = await this.db.user.findFirstOrThrow({
+      where: { id, storeId: actor.storeId },
+      include: { invitations: { orderBy: { createdAt: "desc" }, take: 1 } },
+    });
+    return this.invitations.dto(user);
+  }
+  async resendInvitation(actor: Actor, key: string, id: string) {
+    this.invitations.configured();
+    await this.auth.rate(`invite-resend:${actor.storeId}:${id}`, 3, 3600);
+    let delivery: InvitationDelivery | undefined;
+    await this.writes.run(actor, key, `staff:${id}:invite`, {}, async (tx) => {
+      const user = await tx.user.findFirst({
+        where: { id, storeId: actor.storeId, role: { not: "CUSTOMER" } },
+      });
+      ensure(user, "NOT_FOUND", "Funcionário não encontrado.", 404);
+      ensure(
+        user.enabled && user.onboardingPending,
+        "INVITATION_UNAVAILABLE",
+        "O acesso está desativado ou já foi concluído.",
+        409,
+      );
+      delivery = await this.invitations.prepare(tx, user);
+      await audit(tx, actor, "staff.invitation.resent", { userId: id });
+      return { data: { id } };
+    });
+    if (delivery) await this.invitations.deliver(delivery);
+    return this.invitationUser(actor, id);
   }
   async edit(
     actor: Actor,
@@ -104,8 +144,13 @@ export class StaffService {
               select: { id: true },
             })
           : [];
-        if (!input.enabled)
+        if (!input.enabled) {
           await tx.session.deleteMany({ where: { userId: id } });
+          await tx.staffInvitation.updateMany({
+            where: { userId: id, consumedAt: null },
+            data: { consumedAt: new Date() },
+          });
+        }
         const updated = await tx.user.update({
           where: { id },
           data: { enabled: input.enabled, version: { increment: 1 } },
@@ -130,7 +175,11 @@ export class StaffService {
   }
   async drivers(actor: Actor) {
     const users = await this.db.user.findMany({
-      where: { storeId: actor.storeId, role: "DRIVER" },
+      where: {
+        storeId: actor.storeId,
+        role: "DRIVER",
+        onboardingPending: false,
+      },
       orderBy: { name: "asc" },
       include: {
         driverOrders: {
@@ -172,7 +221,13 @@ export class StaffService {
       input,
       async (tx) => {
         const user = await tx.user.findFirst({
-          where: { id, storeId: actor.storeId, role: "DRIVER", enabled: true },
+          where: {
+            id,
+            storeId: actor.storeId,
+            role: "DRIVER",
+            enabled: true,
+            onboardingPending: false,
+          },
         });
         ensure(user, "NOT_FOUND", "Entregador não encontrado.", 404);
         checkVersion(user.version, input.expectedVersion);

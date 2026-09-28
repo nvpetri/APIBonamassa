@@ -3,6 +3,60 @@ import { config } from "./config";
 
 @Injectable()
 export class Mailer {
+  async invitation(
+    to: string,
+    name: string,
+    store: string,
+    role: string,
+    link: string,
+    id: string,
+  ) {
+    const env = config();
+    const escape = (s: string) =>
+      s.replace(
+        /[&<>"']/g,
+        (c) =>
+          ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          })[c]!,
+      );
+    const label = (
+      {
+        DRIVER: "Entregador",
+        KITCHEN: "Cozinha",
+        ATTENDANT: "Balcão",
+        MANAGER: "Gerente",
+      } as Record<string, string>
+    )[role];
+    if (!env.EMAIL_API_KEY) {
+      if (env.NODE_ENV === "production")
+        throw new Error("EMAIL_API_KEY não configurada.");
+      console.info(`[email:invitation] ${to} ${link}`);
+      return;
+    }
+    const response = await fetch(env.EMAIL_API_URL, {
+      method: "POST",
+      signal: AbortSignal.timeout(10_000),
+      headers: {
+        Authorization: `Bearer ${env.EMAIL_API_KEY}`,
+        "Content-Type": "application/json",
+        "Idempotency-Key": `staff-invitation/${id}`,
+      },
+      body: JSON.stringify({
+        from: env.EMAIL_FROM,
+        to: [to],
+        subject: "Seu convite para a equipe Bonamassa",
+        html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto"><h2>${escape(store)}</h2><p>Olá, ${escape(name)}. Você recebeu um convite para o acesso de ${escape(label)}.</p><p>Complete seu cadastro e escolha sua senha:</p><p><a href="${escape(link)}">Completar cadastro</a></p><p>Este link vale por 24 horas e só pode ser usado uma vez. Se expirar, peça ao gerente um novo convite.</p></div>`,
+        text: `${store}: convite para ${name} (${label}). Complete o cadastro: ${link} . Válido por 24 horas, uso único.`,
+      }),
+    });
+    if (!response.ok)
+      throw new Error(`Falha ao enviar convite: ${response.status}`);
+  }
   async code(to: string, code: string, kind: "verify" | "reset") {
     const env = config();
     const subject =

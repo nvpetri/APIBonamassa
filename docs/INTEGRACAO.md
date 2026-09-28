@@ -203,3 +203,21 @@ Pedidos recebidos são contados pela criação; vendas, pizzas e valores, pela c
 `channels` separa APP, WHATSAPP e COUNTER; `payments` separa CASH, CARD e PREPAID. `timeline` preenche dias sem movimento com zero. `operation` e o balanço de disponibilidade dos motoboys são a situação atual, independente do filtro; entregas, devoluções e comissões por motoboy respeitam o período. Disponibilidade é declarada, não presença online ou GPS.
 
 Novas cotações persistem `priced.pizzaQuantity`, contando pizzas avulsas e quantidades das receitas de combos; meio a meio conta uma pizza. Pedidos antigos sem esse campo contam suas pizzas avulsas. Se também contêm combos, `incompletePizzaOrders` sinaliza a lacuna histórica; o painel informa que o total de pizzas é parcial, sem tentar reconstruir receitas antigas pelo cardápio atual. Não há migração de banco para esta entrega.
+
+## Convites da equipe
+
+`POST /v1/staff/users` agora recebe somente `name`, `email` e `role`, com autenticação de gerente e `Idempotency-Key`. Senha e telefone não são aceitos nesse endpoint. O cadastro fica pendente e o Resend recebe um link de uso único, válido por 24 horas. `POST /v1/staff/users/:id/invite` reenvia e invalida o link anterior (máximo de três reenvios por hora por conta). Desativar a conta também invalida convites.
+
+O link abre a página pública `/convite` do painel; o token fica no fragmento da URL, sem ser enviado em query ou referrer. `POST /v1/auth/staff-invitations/inspect` consulta o convite sem consumi-lo; `POST /v1/auth/staff-invitations/accept` recebe `token`, `password` e `phone` (obrigatório para DRIVER, dispensável para acessos de setor). Nome, função e e-mail ficam vinculados ao convite e não podem ser alterados na ativação. A conclusão confirma o e-mail, grava a senha protegida e habilita o acesso; o entregador entra depois no aplicativo com a senha escolhida. Não é emitida uma sessão pela ativação.
+
+Os tokens têm 256 bits aleatórios e somente seu SHA-256 fica no banco. Consumo e ativação são atômicos, inclusive em chamadas concorrentes. Verificação de e-mail e reset por código não permitem contornar um cadastro pendente. Entregadores pendentes ficam fora da expedição e dos indicadores de motoboys ativos.
+
+`onboardingPending`, `invitationStatus` (SENT/PENDING/EXPIRED/REVOKED ou null) e `invitationExpiresAt` permitem acompanhar a ativação. Falha ou timeout no envio preserva uma única conta pendente, informa que o envio não foi confirmado e permite reenviar pela equipe. Repetir a mesma chave não cria outra conta nem outro convite. Um processo interrompido antes da confirmação do envio também exige reenvio; não há fila de envio em segundo plano.
+
+Contas existentes permanecem funcionando. Cozinha e balcão podem usar uma conta por setor, com nome como “Cozinha” ou “Balcão” e o e-mail de quem fará a ativação. Cada dispositivo mantém uma sessão independente com a regra vigente de inatividade.
+
+### Publicação
+
+Aplique `npm run db:migrate` antes de iniciar esta API. Configure `STAFF_INVITE_URL=https://SEU-PAINEL/convite` no ambiente da API (URL pública real, HTTPS em produção). Preserve `EMAIL_API_KEY` e `EMAIL_FROM` do Resend já configurado. Sem STAFF_INVITE_URL, somente as operações de convite ficam indisponíveis, com erro explicativo. Atualize API e painel em conjunto; apps existentes podem entrar normalmente após a ativação pelo navegador.
+
+Nos testes integrados, `scripts/test-mailer.mjs` captura os e-mails em um servidor local descartável, iniciado apenas com APP_ENV=test. Não faz parte dos endpoints da API nem é iniciado em produção.

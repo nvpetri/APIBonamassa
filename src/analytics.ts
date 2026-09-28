@@ -158,7 +158,7 @@ export class AnalyticsService {
           SELECT COALESCE(max(e."createdAt"), o."updatedAt") AS time FROM "OrderEvent" e
           WHERE e."orderId" = o.id AND e.action IN ('complete','return')
         ) c ON true
-        WHERE u."storeId" = ${actor.storeId}::uuid AND u.role = 'DRIVER'
+        WHERE u."storeId" = ${actor.storeId}::uuid AND u.role = 'DRIVER' AND u."onboardingPending" = false
         GROUP BY u.id ORDER BY u.enabled DESC, u.name, u.id
       `;
         const totals = rows.find((r) => r.group === "summary") ?? emptyTotals();
