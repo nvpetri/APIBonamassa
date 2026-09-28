@@ -1,6 +1,8 @@
-# Contrato de integração — API 0.1.0
+# Contrato de integração — API Bonamassa
 
 Base: `/v1`. JSON UTF-8, centavos inteiros e horários ISO 8601 com fuso. Na interface, apresentar horários em `America/Sao_Paulo`. O relógio válido para promoções e cotações é o do servidor.
+
+`GET /v1/health` é público e consulta o banco antes de responder `{"status":"ok","version":"0.2.0","commit":null}` (exemplo). `version` vem do pacote compilado; `commit` é o SHA completo informado pelo deploy, ou `null` quando não disponível. O prefixo `/v1` identifica a família do contrato HTTP e não acompanha cada incremento da versão do software. Consulte a [política de versões](VERSIONAMENTO.md).
 
 ## Sessão e perfis
 

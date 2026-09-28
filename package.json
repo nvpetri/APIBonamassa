@@ -1,6 +1,6 @@
 {
   "name": "bonamassa-api",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "engines": {
     "node": ">=24 <25"
@@ -17,6 +17,7 @@
     "test:integration": "npm run build && node --env-file-if-exists=.env --test dist/test/integration.test.js",
     "format": "prettier --write .",
     "check": "tsc --noEmit && prettier --check .",
+    "release:check": "node scripts/check-release.mjs",
     "backup": "node scripts/backup.mjs",
     "maintenance": "node --env-file-if-exists=.env dist/scripts/maintenance.js",
     "smoke": "node --env-file-if-exists=.env scripts/smoke.mjs",

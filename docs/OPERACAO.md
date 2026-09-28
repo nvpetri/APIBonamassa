@@ -1,4 +1,4 @@
-# Operação da base 0.1.0
+# Operação da API Bonamassa
 
 ## Configuração
 
@@ -31,6 +31,8 @@ Defina no Render `NODE_ENV=production`, `DATABASE_URL` com a conexão direta do 
 Defina também `CORS_ORIGINS` explicitamente. Para o painel Next.js que encaminha chamadas pelo servidor e os aplicativos Android nativos, o valor pode ser vazio. Se um frontend no navegador acessar a API diretamente, liste suas origens HTTPS exatas, separadas por vírgula. O Render define `PORT` e a API escuta em `0.0.0.0`.
 
 Depois do deploy, confirme que `/v1/health` retorna `status: "ok"` e que o gestor consegue fazer login. A cada reinício, o comando aplica somente migrations pendentes e preserva os cadastros e senhas existentes no seed. O comando padrão do Dockerfile permanece disponível para infraestruturas que executam migrations e seed separadamente.
+
+Confira também `version` e `commit` no health. A versão é lida do `package.json` copiado na compilação, inclusive no Docker. No Render, o commit vem de `RENDER_GIT_COMMIT`; fora dele, informe `APP_COMMIT_SHA` com o SHA completo dos fontes usados na imagem. Sem esse metadado o campo retorna `null`. Não configure uma versão manual por variável de ambiente. Veja [VERSIONAMENTO.md](VERSIONAMENTO.md).
 
 ## Banco e concorrência
 

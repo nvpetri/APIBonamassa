@@ -11,6 +11,7 @@ import { tokenHash } from "../src/db";
 import { price, quoteSchema } from "../src/domain";
 import { RateLimitError } from "../src/rate-limit";
 import { demoProducts, seedStore } from "../prisma/seed";
+import { version as packageVersion } from "../package.json";
 
 function socketEvent(socket: Socket, event: string) {
   return new Promise<void>((resolve, reject) => {
@@ -1232,8 +1233,14 @@ test(
       await t.test(
         "health e OpenAPI; autenticação obrigatória e campos privados ausentes",
         async () => {
-          assert.equal((await ok("health")).status, "ok");
+          const health = await ok("health");
+          assert.equal(health.status, "ok");
+          assert.equal(health.version, packageVersion);
+          assert.ok(
+            health.commit === null || /^[a-f0-9]{40}$/.test(health.commit),
+          );
           const doc = await ok("openapi.json");
+          assert.equal(doc.info.version, packageVersion);
           assert.ok(doc.paths["/v1/orders/quote"]);
           assert.ok(doc.paths["/v1/driver/deliveries/{id}/complete"]);
           assert.equal((await api("staff/orders")).status, 401);

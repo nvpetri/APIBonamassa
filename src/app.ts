@@ -22,6 +22,7 @@ import { SchedulingService } from "./scheduling";
 import { Mailer } from "./mailer";
 import { InvitationsService } from "./invitations";
 import { AnalyticsService } from "./analytics";
+import { apiVersion } from "./version";
 
 @Module({
   controllers: [ApiController],
@@ -107,7 +108,7 @@ export async function createApp(quiet = false) {
         .setDescription(
           "Valores em centavos. Horários ISO 8601. Login fornece um token Bearer revogável. As mutações exigem Idempotency-Key e as edições exigem expectedVersion.",
         )
-        .setVersion("0.1.0")
+        .setVersion(apiVersion)
         .addBearerAuth()
         .build(),
     );

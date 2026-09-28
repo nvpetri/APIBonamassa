@@ -4,6 +4,25 @@ import express from "express";
 import { config } from "../src/config";
 import { deployment } from "../src/deployment";
 import { RateLimitError, retryAfterSeconds } from "../src/rate-limit";
+import { releaseInfo } from "../src/version";
+
+test("health identifica o commit do deploy e não expõe valores arbitrários do ambiente", () => {
+  const render = "a".repeat(40),
+    docker = "b".repeat(40);
+  assert.equal(
+    releaseInfo({ RENDER_GIT_COMMIT: render, APP_COMMIT_SHA: docker }).commit,
+    render,
+  );
+  assert.equal(
+    releaseInfo({ APP_COMMIT_SHA: docker.toUpperCase() }).commit,
+    docker,
+  );
+  assert.equal(releaseInfo({}).commit, null);
+  assert.equal(
+    releaseInfo({ APP_COMMIT_SHA: "valor-inválido-ou-segredo" }).commit,
+    null,
+  );
+});
 
 const production = {
   NODE_ENV: "production",

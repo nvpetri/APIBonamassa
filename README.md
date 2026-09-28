@@ -1,8 +1,8 @@
 # Bonamassa API
 
-API central da Bonamassa, em **NestJS + TypeScript + PostgreSQL + Prisma**. Versão 0.1.0: pedidos persistentes, login por perfil e fluxo completo entre atendimento, cozinha e entregador.
+API central da Bonamassa, em **NestJS + TypeScript + PostgreSQL + Prisma**. Pedidos persistentes, login por perfil e fluxo completo entre atendimento, cozinha e entregador. A versão vem de `package.json` e é exposta em `/v1/health` e no Swagger. Veja o [histórico de mudanças](CHANGELOG.md) e a [política de versões](docs/VERSIONAMENTO.md).
 
-Este repositório fornece o backend. **As demos Android e o painel continuam usando seus bancos locais até a implementação dos adaptadores de integração nos respectivos repositórios.**
+Este repositório fornece o backend integrado ao BonamassaPainel, BonamassaAndroid e BonamassaEntregador. Os clientes têm versões próprias; o SHA da API fixado em seus testes registra a revisão de integração validada.
 
 ## O que está implementado
 

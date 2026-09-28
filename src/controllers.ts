@@ -58,6 +58,7 @@ import { OrdersService } from "./orders";
 import { StaffService } from "./staff";
 import { keySchema } from "./writes";
 import { AnalyticsService, analyticsQuery } from "./analytics";
+import { releaseInfo } from "./version";
 
 @Controller()
 @ApiBearerAuth()
@@ -78,7 +79,7 @@ export class ApiController {
   @ApiTags("Sistema")
   async health() {
     await this.db.$queryRaw`SELECT 1`;
-    return { status: "ok", version: "0.1.0" };
+    return { status: "ok", ...releaseInfo() };
   }
 
   @Post("sessions")
