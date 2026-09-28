@@ -8,6 +8,7 @@ import type { Store } from "@prisma/client";
 import { Db, Tx } from "./db";
 import { Change, ChangeBus } from "./realtime";
 import { operation } from "./schedule";
+import { config } from "./config";
 
 @Injectable()
 export class SchedulingService implements OnModuleInit, OnModuleDestroy {
@@ -20,7 +21,9 @@ export class SchedulingService implements OnModuleInit, OnModuleDestroy {
   ) {}
   onModuleInit() {
     // Requests also reconcile, so a sleeping/restarted service cannot miss a shift.
-    this.timer = setInterval(() => void this.tick(), 15_000);
+    const seconds = config().SCHEDULER_INTERVAL_SECONDS;
+    if (seconds === 0) return;
+    this.timer = setInterval(() => void this.tick(), seconds * 1000);
     this.timer.unref();
   }
   onModuleDestroy() {

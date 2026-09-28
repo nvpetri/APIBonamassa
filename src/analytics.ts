@@ -1,10 +1,12 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, OnModuleDestroy } from "@nestjs/common";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { Actor, AuthService } from "./auth";
 import { Db } from "./db";
 import { ensure } from "./domain";
 import { STORE_TIME_ZONE } from "./schedule";
+import { Change, ChangeBus } from "./realtime";
+import { ReadCache } from "./read-cache";
 
 export const analyticsQuery = z
   .strictObject({
@@ -57,11 +59,23 @@ const activeStatuses = [
 ] as const;
 
 @Injectable()
-export class AnalyticsService {
+export class AnalyticsService implements OnModuleDestroy {
+  private readonly cache = new ReadCache<
+    Awaited<ReturnType<AnalyticsService["calculate"]>>
+  >();
+  private readonly invalidate = (change: Change) =>
+    this.cache.invalidate(`${change.storeId}:`);
   constructor(
     private readonly db: Db,
     private readonly auth: AuthService,
-  ) {}
+    private readonly bus: ChangeBus,
+  ) {
+    bus.events.on("change", this.invalidate);
+  }
+
+  onModuleDestroy() {
+    this.bus.events.off("change", this.invalidate);
+  }
 
   async dashboard(actor: Actor, period: z.infer<typeof analyticsQuery>) {
     ensure(
@@ -70,6 +84,17 @@ export class AnalyticsService {
       "Acesso exclusivo do gerente.",
       403,
     );
+    // Recheck authorization even on a hit; session/role revocation is never cached.
+    await this.auth.assertActive(actor);
+    return this.cache.get(`${actor.storeId}:${period.from}:${period.to}`, () =>
+      this.calculate(actor, period),
+    );
+  }
+
+  private async calculate(
+    actor: Actor,
+    period: z.infer<typeof analyticsQuery>,
+  ) {
     // One read snapshot keeps the totals, series and current driver balances coherent.
     return this.db.$transaction(
       async (tx) => {
@@ -154,6 +179,8 @@ export class AnalyticsService {
             ((${period.to}::date + 1)::timestamp AT TIME ZONE ${STORE_TIME_ZONE}) AT TIME ZONE 'UTC' AS finish
         ) b
         LEFT JOIN "Order" o ON o."driverId" = u.id AND o."storeId" = u."storeId"
+          AND (o.status NOT IN ('DELIVERED','CANCELLED','RETURNED')
+            OR (o.status IN ('DELIVERED','RETURNED') AND o."updatedAt" >= b.start))
         LEFT JOIN LATERAL (
           SELECT COALESCE(max(e."createdAt"), o."updatedAt") AS time FROM "OrderEvent" e
           WHERE e."orderId" = o.id AND e.action IN ('complete','return')

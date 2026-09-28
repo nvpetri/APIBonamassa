@@ -124,3 +124,16 @@ test("convites aceitam somente links públicos seguros em produção", () => {
     );
   }
 });
+
+test("scheduler can be disabled explicitly without allowing invalid intervals", () => {
+  assert.equal(config(production).SCHEDULER_INTERVAL_SECONDS, 15);
+  assert.equal(
+    config({ ...production, SCHEDULER_INTERVAL_SECONDS: "0" })
+      .SCHEDULER_INTERVAL_SECONDS,
+    0,
+  );
+  for (const value of ["-1", "1.5", "3601", "invalid"])
+    assert.throws(() =>
+      config({ ...production, SCHEDULER_INTERVAL_SECONDS: value }),
+    );
+});

@@ -8,3 +8,7 @@ coverage/
 .DS_Store
 
 !.env.production.example
+
+backup-output/
+*.dump
+*.dump.enc

@@ -1,0 +1,36 @@
+name: Backup criptografado
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 7 * * *" # 04:30 em São Paulo
+permissions:
+  contents: read
+concurrency:
+  group: bonamassa-database-backup
+  cancel-in-progress: false
+jobs:
+  backup:
+    # Opt-in: nothing connects to a database until the operator configures this.
+    if: vars.BACKUP_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Gerar e criptografar cópia
+        env:
+          BACKUP_DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          node scripts/backup.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backup-criptografado-${{ github.run_id }}
+          path: backup-output/*.dump.enc
+          if-no-files-found: error
+          retention-days: 7

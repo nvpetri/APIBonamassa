@@ -9,6 +9,12 @@ export function config(env: NodeJS.ProcessEnv = process.env) {
         .enum(["development", "test", "production"])
         .default("development"),
       PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+      SCHEDULER_INTERVAL_SECONDS: z.coerce
+        .number()
+        .int()
+        .min(0)
+        .max(3600)
+        .default(15),
       DATABASE_URL: z.string().url(),
       CORS_ORIGINS: z.string().default("http://localhost:3000"),
       DOCS_ENABLED: z.enum(["true", "false"]).default("false"),

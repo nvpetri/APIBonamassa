@@ -7,6 +7,7 @@ import { config } from "./config";
 import { AuthService, userDto, hashPassword } from "./auth";
 import { acceptInviteSchema, ensure, phoneSchema } from "./domain";
 import { Mailer } from "./mailer";
+import { ChangeBus } from "./realtime";
 
 export type InvitationDelivery = {
   id: string;
@@ -25,6 +26,7 @@ export class InvitationsService {
     private readonly db: Db,
     private readonly auth: AuthService,
     private readonly mailer: Mailer,
+    private readonly bus: ChangeBus,
   ) {}
   configured() {
     const url = config().STAFF_INVITE_URL;
@@ -139,7 +141,7 @@ export class InvitationsService {
     );
     if (initial.user.role === "DRIVER") phoneSchema.parse(input.phone);
     const passwordHash = await hashPassword(input.password);
-    return this.db.write(initial.user.storeId, async (tx) => {
+    const result = await this.db.write(initial.user.storeId, async (tx) => {
       const invite = await tx.staffInvitation.findUnique({
         where: { id: initial.id },
         include: { user: true },
@@ -184,5 +186,10 @@ export class InvitationsService {
       });
       return { activated: true, role: invite.user.role };
     });
+    this.bus.publish({
+      storeId: initial.user.storeId,
+      type: "staff.invitation.accepted",
+    });
+    return result;
   }
 }

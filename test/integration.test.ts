@@ -456,6 +456,11 @@ test(
             });
             await fixture({ otherStore: true });
             const result = await ok(path, "manager");
+            assert.deepEqual(
+              await ok(path, "manager"),
+              result,
+              "repeated authenticated read reuses the same snapshot",
+            );
             assert.equal(result.receivedOrders, 106);
             assert.equal(result.completedOrders, 104);
             assert.equal(result.cancelledOrders, 1);

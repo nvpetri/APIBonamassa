@@ -20,6 +20,7 @@ jobs:
           --health-cmd "pg_isready -U bonamassa -d bonamassa_test"
           --health-interval 5s --health-timeout 3s --health-retries 20
     env:
+      SCHEDULER_INTERVAL_SECONDS: "0"
       NODE_ENV: test
       DATABASE_URL: postgresql://bonamassa:ci-only-password@localhost:5432/bonamassa_test
       TEST_DATABASE_URL: postgresql://bonamassa:ci-only-password@localhost:5432/bonamassa_test
@@ -39,6 +40,29 @@ jobs:
         run: |
           npx --no-install prettier --write .
           git diff
+      - name: Verify encrypted PostgreSQL backup and isolated restore
+        env:
+          BACKUP_DATABASE_URL: postgresql://bonamassa:ci-only-password@localhost:5432/bonamassa_test?sslmode=disable
+          BACKUP_ENCRYPTION_KEY: ci-only-encryption-key-never-use-for-real-backups
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: bonamassa
+          PGPASSWORD: ci-only-password
+        run: |
+          export PATH="/usr/lib/postgresql/17/bin:$PATH"
+          psql -d bonamassa_test -v ON_ERROR_STOP=1 -c 'CREATE TABLE "BackupProbe" (id int PRIMARY KEY, value text NOT NULL); INSERT INTO "BackupProbe" VALUES (1, $$backup-data-roundtrip$$);'
+          node scripts/backup.mjs
+          encrypted=$(find backup-output -name '*.dump.enc' -print -quit)
+          node scripts/decrypt-backup.mjs "$encrypted" "$RUNNER_TEMP/recovered.dump"
+          createdb bonamassa_restore_test
+          pg_restore --dbname bonamassa_restore_test --no-owner --no-acl --exit-on-error "$RUNNER_TEMP/recovered.dump"
+          source_count=$(psql -d bonamassa_test -Atc 'SELECT count(*) FROM "_prisma_migrations"')
+          restored_count=$(psql -d bonamassa_restore_test -Atc 'SELECT count(*) FROM "_prisma_migrations"')
+          test "$source_count" -gt 0
+          test "$source_count" = "$restored_count"
+          test "$(psql -d bonamassa_restore_test -Atc 'SELECT value FROM "BackupProbe" WHERE id = 1')" = "backup-data-roundtrip"
+          psql -d bonamassa_test -v ON_ERROR_STOP=1 -c 'DROP TABLE "BackupProbe"'
+          rm -f "$RUNNER_TEMP/recovered.dump"
       - run: npm run test:integration
       - name: Verify deployment startup in Docker
         timeout-minutes: 5
