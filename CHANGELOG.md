@@ -1,5 +1,15 @@
 # Histórico da API Bonamassa
 
+## [0.12.1] - 2026-09-28
+
+Corrige a numeração do pacote e do health após classificação de todos os 67 commits anteriores. A sequência reconstruída chega a 0.12.0 no commit `77c1c93` (metadados de deploy e CI); esta correção de numeração é o PATCH 0.12.1.
+
+A [relação integral de commits](docs/HISTORICO-COMMITS.md) registra cada hash, categoria e versão atribuída. Os marcos funcionais são: 0.1 API central; 0.2 agendamentos; 0.3 segurança/preflight; 0.4 atualização de hashes; 0.5 endereços/rotas; 0.6 verificação/reset; 0.7 sessões deslizantes; 0.8 métricas; 0.9 convites; 0.10 backups/Neon; 0.11 auditoria; 0.12 metadados de deploy/versionamento. As correções intermediárias estão discriminadas no levantamento.
+
+As versões históricas são atribuídas retrospectivamente, sem reescrever commits ou inventar tags/deploys passados. O registro de 0.2.0 abaixo preserva a versão efetivamente gravada pela consolidação anterior, agora substituída; não deve ser confundido com o ciclo 0.2.0 de agendamento na reconstrução.
+
+Health e Swagger continuam lendo `package.json`. Não há alteração funcional nem migration nova nesta revisão. Próximos incrementos: 0.12.2 para correção compatível ou 0.13.0 para nova funcionalidade.
+
 ## [0.2.0] - 2026-09-28
 
 Primeira consolidação do versionamento após a base 0.1.0. O levantamento encontrou 66 commits alcançáveis em `main` até `07a7395`, dos quais 64 posteriores à implementação inicial `8b5e602` (incluindo merges, testes e formatação). Não havia tags ou GitHub Releases. O pacote, health e Swagger ainda declaravam 0.1.0 em todas essas revisões. Os marcos abaixo são mudanças verificadas nos commits, sem atribuir versões retroativas que não foram publicadas.

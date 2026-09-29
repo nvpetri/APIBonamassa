@@ -1,10 +1,14 @@
 # Versão da API e identificação do deploy
 
-## Decisão da consolidação
+## Reconstrução das versões
 
-A única versão declarada até 28/09/2026 era 0.1.0. O histórico contém novas funcionalidades, correções e mudanças de contrato, sem tags/releases intermediários. A próxima versão consolidada é **0.2.0**: incremento MINOR, PATCH zerado e MAJOR zero enquanto o projeto segue em desenvolvimento/homologação. Não existe um cálculo único baseado no total de commits: merges, testes, formatação e vários commits da mesma funcionalidade não representam releases independentes. O [CHANGELOG](../CHANGELOG.md) registra o levantamento e as incompatibilidades acumuladas.
+A versão atual é **0.12.1**, resultante da classificação individual dos 67 commits anteriores até `77c1c93`, com um PATCH para corrigir a numeração nesta revisão. A [relação integral](HISTORICO-COMMITS.md) contém hash, mensagem original, categoria, ciclo atribuído e justificativa de cada commit. Foram identificados 12 ciclos funcionais/operacionais, incluindo a implementação inicial, com correções PATCH entre eles.
 
-Usamos [Semantic Versioning](https://semver.org/lang/pt-BR/). Durante 0.x, adições e mudanças de contrato são entregues em novo MINOR, com os consumidores atualizados quando necessário. Correções compatíveis usam PATCH. A aprovação de 1.0.0 estabelece o contrato estável de produção; a partir daí, incompatibilidades exigem novo MAJOR e um plano de migração dos consumidores.
+A consolidação anterior em 0.2.0 agrupou excessivamente a evolução. Ela foi substituída pela reconstrução solicitada: cada ciclo distinto recebe seu incremento, componentes da mesma funcionalidade compartilham o ciclo, e merges comuns/testes/documentação/formatação equivalente não criam novas versões funcionais. A análise considera o código alterado, inclusive correções de compilação escondidas em mensagens de formatação.
+
+Os números antigos são uma classificação retrospectiva, não tags/releases que existiam na época. O Git original é preservado. O [CHANGELOG](../CHANGELOG.md) registra a versão efetiva atual e mantém a evidência da consolidação anterior.
+
+Seguimos a convenção [Semantic Versioning](https://semver.org/lang/pt-BR/): durante 0.x, novas capacidades e mudanças de contrato elevam MINOR; correções compatíveis elevam PATCH. Cada MINOR zera PATCH. A passagem a 1.0.0 estabelecerá o contrato estável de produção; incompatibilidades posteriores exigirão MAJOR e migração coordenada dos consumidores. O total de versões históricas é resultado do agrupamento documentado, não uma propriedade automática ou única do Git.
 
 ## Fonte única e health
 
@@ -13,7 +17,7 @@ Usamos [Semantic Versioning](https://semver.org/lang/pt-BR/). Durante 0.x, adiç
 `GET /v1/health` continua executando `SELECT 1` antes de responder. Exemplo sem metadado Git:
 
 ```json
-{ "status": "ok", "version": "0.2.0", "commit": null }
+{ "status": "ok", "version": "0.12.1", "commit": null }
 ```
 
 No Render, `commit` usa `RENDER_GIT_COMMIT`, fornecido pela plataforma também para Docker ([documentação](https://render.com/docs/environment-variables)). Fora do Render, pode-se fornecer `APP_COMMIT_SHA` ao iniciar o contêiner/processo. Informe o SHA completo de 40 caracteres dos fontes da imagem. Valor ausente ou inválido resulta em `null`; o programa não inventa um hash. Não passe o SHA de outro repositório ou do checkout do servidor que apenas executa uma imagem antiga.
@@ -22,12 +26,12 @@ A versão identifica a entrega; o commit identifica a revisão exata. O prefixo 
 
 ## Próximas alterações
 
-| Alteração da API                                     | Próxima versão a partir de 0.2.0 | Comando                                                    |
-| ---------------------------------------------------- | -------------------------------- | ---------------------------------------------------------- |
-| Correção compatível                                  | 0.2.1                            | `npm version patch --no-git-tag-version`                   |
-| Funcionalidade ou evolução de contrato em 0.x        | 0.3.0                            | `npm version minor --no-git-tag-version`                   |
-| Estabelecimento do contrato estável                  | 1.0.0                            | `npm version 1.0.0 --no-git-tag-version`                   |
-| Somente documentação/testes sem alteração executável | Mantém a versão                  | Atualizar o documento/teste; o commit distingue a revisão. |
+| Alteração da API                                     | Próxima versão a partir de 0.12.1 | Comando                                                    |
+| ---------------------------------------------------- | --------------------------------- | ---------------------------------------------------------- |
+| Correção compatível                                  | 0.12.2                            | `npm version patch --no-git-tag-version`                   |
+| Funcionalidade ou evolução de contrato em 0.x        | 0.13.0                            | `npm version minor --no-git-tag-version`                   |
+| Estabelecimento do contrato estável                  | 1.0.0                             | `npm version 1.0.0 --no-git-tag-version`                   |
+| Somente documentação/testes sem alteração executável | Mantém a versão                   | Atualizar o documento/teste; o commit distingue a revisão. |
 
 1. Classificar o conjunto de mudanças da entrega, atualizar a versão com o comando adequado e acrescentar a seção correspondente no changelog.
 2. Executar `npm run release:check`, `npm test` e `npm run check`. CI também valida integração real e o health na imagem Docker.
