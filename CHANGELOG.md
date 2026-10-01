@@ -1,5 +1,13 @@
 # Histórico da API Bonamassa
 
+## [0.13.0] - 2026-10-01
+
+Endereço físico da pizzaria, cinco faixas de frete por distância de trajeto e snapshots de origem/destino no pedido. OpenRouteService é consultado apenas pela API, com cache limitado, timeout e geocodificação de endereço completo. As consultas externas ocorrem fora do lock transacional; gravações revalidam a configuração, e reenvios idempotentes funcionam durante indisponibilidade do provedor.
+
+Pedidos fora da quinta faixa, sem localização precisa ou sem trajeto são bloqueados antes da confirmação. Mudanças de endereço/taxas invalidam cotações pendentes; pedidos confirmados preservam seus valores e origem. Saídas conjuntas são ordenadas por distância da pizzaria; clientes antigos e lojas existentes continuam com frete fixo até a ativação do gerente. Retirada permanece sem frete e sem consulta a mapas.
+
+Aplicar a migration `202610010001_distance_delivery`, configurar `MAPS_API_KEY` na API e salvar o endereço e as cinco faixas no painel. Coordenadas são ocultadas das cópias da auditoria. Ver [configuração e limites](docs/FRETE-E-ROTAS.md).
+
 ## [0.12.1] - 2026-09-28
 
 Corrige a numeração do pacote e do health após classificação de todos os 67 commits anteriores. A sequência reconstruída chega a 0.12.0 no commit `77c1c93` (metadados de deploy e CI); esta correção de numeração é o PATCH 0.12.1.

@@ -21,6 +21,11 @@ export function config(env: NodeJS.ProcessEnv = process.env) {
       SESSION_IDLE_DAYS: z.coerce.number().int().min(1).max(30).default(5),
       CUSTOMER_REGISTRATION_ENABLED: z.enum(["true", "false"]).default("true"),
       STAFF_INVITE_URL: z.string().url().optional(),
+      MAPS_API_KEY: z.string().min(1).optional(),
+      MAPS_API_URL: z
+        .string()
+        .url()
+        .default("https://api.openrouteservice.org/"),
       EMAIL_API_KEY: z.string().min(1).optional(),
       EMAIL_FROM: z
         .string()
@@ -64,5 +69,17 @@ export function config(env: NodeJS.ProcessEnv = process.env) {
         "STAFF_INVITE_URL deve ser a URL pública da página /convite, HTTPS em produção, sem credenciais, query ou fragmento.",
       );
   }
+  const mapsUrl = new URL(e.MAPS_API_URL);
+  if (
+    mapsUrl.username ||
+    mapsUrl.password ||
+    mapsUrl.search ||
+    mapsUrl.hash ||
+    !["http:", "https:"].includes(mapsUrl.protocol) ||
+    (e.NODE_ENV !== "test" && mapsUrl.protocol !== "https:")
+  )
+    throw new Error(
+      "MAPS_API_URL deve usar HTTPS, sem credenciais, query ou fragmento.",
+    );
   return { ...e, origins, ...deploy };
 }

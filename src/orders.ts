@@ -14,6 +14,13 @@ import {
   price,
   startRouteSchema,
 } from "./domain";
+import {
+  DeliveryMaps,
+  DeliverySnapshot,
+  deliverySnapshotSchema,
+  deliveryDto,
+  snapshotFee,
+} from "./delivery";
 import { Change } from "./realtime";
 import { Writes, checkVersion } from "./writes";
 import { operation, STORE_TIME_ZONE } from "./schedule";
@@ -23,6 +30,7 @@ type Loaded = Order & { events: OrderEvent[] };
 type ScheduledPrice = Priced & {
   scheduledFor: string | null;
   timeZone: string;
+  delivery: DeliverySnapshot | null;
 };
 export type Action =
   | "accept"
@@ -105,6 +113,7 @@ function orderDto(order: Loaded, actor: Actor) {
     items,
     customer: order.customer,
     address: order.address,
+    delivery: deliveryDto(order.deliverySnapshot),
     payment: order.payment,
     paymentRecorded: order.paymentRecorded,
     cashTendered: order.cashTendered,
@@ -146,6 +155,7 @@ export class OrdersService {
     private readonly db: Db,
     private readonly writes: Writes,
     private readonly scheduling: SchedulingService,
+    private readonly maps: DeliveryMaps,
   ) {}
   async list(actor: Actor, query: z.infer<typeof listSchema>) {
     await this.scheduling.reconcile(actor.storeId);
@@ -191,7 +201,12 @@ export class OrdersService {
     ensure(order, "NOT_FOUND", "Pedido não encontrado.", 404);
     return orderDto(order, actor);
   }
-  private async calculate(tx: Tx, storeId: string, draft: Draft) {
+  private async calculate(
+    tx: Tx,
+    storeId: string,
+    draft: Draft,
+    delivery: DeliverySnapshot | null,
+  ) {
     const store = await tx.store.findUniqueOrThrow({ where: { id: storeId } });
     const state = operation(store);
     ensure(
@@ -214,50 +229,94 @@ export class OrdersService {
       ...price(
         products,
         draft,
-        draft.mode === "DELIVERY" ? store.deliveryFee : 0,
+        draft.mode === "DELIVERY" ? snapshotFee(store, delivery) : 0,
         promo ? decodePromotion(promo) : null,
       ),
       scheduledFor: state.open ? null : state.nextOpening,
       timeZone: STORE_TIME_ZONE,
+      delivery,
     };
   }
   quote(actor: Actor, key: string, input: Draft) {
-    return this.writes.run(actor, key, "quote:new", input, async (tx) => {
-      if (actor.role === "CUSTOMER")
+    return this.writes.run(
+      actor,
+      key,
+      "quote:new",
+      input,
+      async (tx, delivery) => {
+        if (actor.role === "CUSTOMER")
+          ensure(
+            input.customer === undefined && input.channel === undefined,
+            "FORBIDDEN",
+            "Dados do cliente e canal são definidos pela sessão.",
+            403,
+          );
+        else
+          ensure(
+            input.customer && input.channel,
+            "MISSING_CUSTOMER",
+            "Informe o cliente e o canal do pedido manual.",
+          );
+        const draft = {
+          ...input,
+          customer:
+            actor.role === "CUSTOMER"
+              ? { name: actor.name, phone: actor.phone }
+              : input.customer,
+        };
+        const priced = await this.calculate(tx, actor.storeId, draft, delivery);
+        const quote = await tx.quote.create({
+          data: {
+            storeId: actor.storeId,
+            userId: actor.id,
+            draft: json(draft),
+            priced: json(priced),
+            fingerprint: digest(priced),
+            expiresAt: new Date(Date.now() + 5 * 60_000),
+          },
+        });
+        return {
+          data: {
+            quoteId: quote.id,
+            expiresAt: quote.expiresAt,
+            ...priced,
+            delivery: deliveryDto(priced.delivery),
+          },
+        };
+      },
+      async () => {
+        if (actor.role === "CUSTOMER")
+          ensure(
+            input.customer === undefined && input.channel === undefined,
+            "FORBIDDEN",
+            "Dados do cliente e canal são definidos pela sessão.",
+            403,
+          );
+        else
+          ensure(
+            input.customer && input.channel,
+            "MISSING_CUSTOMER",
+            "Informe o cliente e o canal do pedido manual.",
+          );
+        if (input.mode === "PICKUP") return null;
+        const store = await this.db.store.findUniqueOrThrow({
+          where: { id: actor.storeId },
+        });
         ensure(
-          input.customer === undefined && input.channel === undefined,
-          "FORBIDDEN",
-          "Dados do cliente e canal são definidos pela sessão.",
-          403,
+          input.address,
+          "ADDRESS_REQUIRED",
+          "Informe o endereço da entrega.",
         );
-      else
+        const state = operation(store);
         ensure(
-          input.customer && input.channel,
-          "MISSING_CUSTOMER",
-          "Informe o cliente e o canal do pedido manual.",
+          state.open || (state.reservationsAvailable && input.allowScheduling),
+          "STORE_CLOSED",
+          "A loja está fechada para novos pedidos.",
+          409,
         );
-      const draft = {
-        ...input,
-        customer:
-          actor.role === "CUSTOMER"
-            ? { name: actor.name, phone: actor.phone }
-            : input.customer,
-      };
-      const priced = await this.calculate(tx, actor.storeId, draft);
-      const quote = await tx.quote.create({
-        data: {
-          storeId: actor.storeId,
-          userId: actor.id,
-          draft: json(draft),
-          priced: json(priced),
-          fingerprint: digest(priced),
-          expiresAt: new Date(Date.now() + 5 * 60_000),
-        },
-      });
-      return {
-        data: { quoteId: quote.id, expiresAt: quote.expiresAt, ...priced },
-      };
-    });
+        return this.maps.resolve(store, input.address);
+      },
+    );
   }
   create(actor: Actor, key: string, quoteId: string) {
     return this.writes.run(actor, key, "order:new", { quoteId }, async (tx) => {
@@ -279,7 +338,23 @@ export class OrdersService {
       const draft = quote.draft as unknown as Draft;
       let priced: ScheduledPrice;
       try {
-        priced = await this.calculate(tx, actor.storeId, draft);
+        const savedDelivery = deliverySnapshotSchema
+          .nullable()
+          .safeParse(
+            (quote.priced as unknown as ScheduledPrice).delivery ?? null,
+          );
+        ensure(
+          savedDelivery.success,
+          "QUOTE_CHANGED",
+          "Atualize a cotação de entrega.",
+          409,
+        );
+        priced = await this.calculate(
+          tx,
+          actor.storeId,
+          draft,
+          savedDelivery.data,
+        );
       } catch (error) {
         if (!(error instanceof RuleError)) throw error;
         ensure(
@@ -341,6 +416,9 @@ export class OrdersService {
             : null,
           customerId: actor.role === "CUSTOMER" ? actor.id : null,
           customer: json(draft.customer),
+          deliverySnapshot: priced.delivery
+            ? json(priced.delivery)
+            : Prisma.DbNull,
           address: draft.address ? json(draft.address) : Prisma.DbNull,
           channel: actor.role === "CUSTOMER" ? "APP" : draft.channel!,
           mode: draft.mode,
@@ -450,7 +528,15 @@ export class OrdersService {
           );
         }
         const updated: Loaded[] = [];
-        for (const selected of route.deliveries) {
+        const selectedRoute = [...route.deliveries].sort((a, b) => {
+          const left = byId.get(a.id)!,
+            right = byId.get(b.id)!;
+          const distance = (order: Order) =>
+            deliveryDto(order.deliverySnapshot)?.distanceMeters ??
+            Number.MAX_SAFE_INTEGER;
+          return distance(left) - distance(right) || left.number - right.number;
+        });
+        for (const selected of selectedRoute) {
           const order = byId.get(selected.id)!;
           const collecting = order.deliveryStatus === "ASSIGNED";
           const version = order.version + (collecting ? 2 : 1);

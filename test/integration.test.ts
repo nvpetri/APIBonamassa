@@ -5,6 +5,8 @@ import { Prisma, PrismaClient, Role } from "@prisma/client";
 import { io, Socket } from "socket.io-client";
 import sharp from "sharp";
 import { createApp } from "../src/app";
+import { DeliveryMaps } from "../src/delivery";
+import { RuleError } from "../src/domain";
 import { Mailer } from "../src/mailer";
 import { AuthService, hashPassword } from "../src/auth";
 import { tokenHash } from "../src/db";
@@ -987,6 +989,286 @@ test(
             reason: "Cliente ausente",
           });
           await cmd(returned, "return", "driver");
+        },
+      );
+
+      await t.test(
+        "endereço, frete por cinco faixas, snapshots, reenvios e corrida de configuração",
+        async () => {
+          const initial = (await ok("staff/catalog", "manager")).store;
+          const maps = app.get(DeliveryMaps);
+          const geocode = maps.geocode.bind(maps),
+            directions = maps.route.bind(maps);
+          let calls = 0,
+            unavailable = false;
+          maps.geocode = async (address) => ({
+            latitude: -23.55 + Number(address.number) / 1_000_000,
+            longitude: -46.63,
+          });
+          maps.route = async (_origin, destination) => {
+            calls++;
+            if (unavailable)
+              throw new RuleError(
+                "MAPS_UNAVAILABLE",
+                "Mapas de teste indisponíveis.",
+                503,
+              );
+            return {
+              distanceMeters: Math.round(
+                (destination.latitude + 23.55) * 1_000_000,
+              ),
+              durationSeconds: 300,
+            };
+          };
+          const bands = [2000, 4000, 6000, 8000, 10000].map(
+            (upToMeters, index) => ({ upToMeters, fee: 500 + index * 200 }),
+          );
+          async function settings(
+            patch: Record<string, unknown>,
+            who = "manager",
+            key?: string,
+          ) {
+            const current = (await ok("staff/catalog", "manager")).store;
+            return api(
+              "staff/store",
+              who,
+              "PATCH",
+              {
+                expectedVersion: current.version,
+                name: current.name,
+                deliveryFee: current.deliveryFee,
+                driverFee: current.driverFee,
+                ...patch,
+              },
+              key,
+            );
+          }
+          const target = (number: string) => ({
+            ...draft,
+            payment: "CARD",
+            cashTendered: null,
+            address: { ...draft.address, number },
+          });
+          try {
+            assert.equal(
+              (await settings({ address: draft.address }, "attendant")).status,
+              403,
+            );
+            assert.equal(
+              (
+                await settings({
+                  deliveryPricingMode: "DISTANCE",
+                  deliveryBands: bands,
+                })
+              ).data.code,
+              "DELIVERY_NOT_CONFIGURED",
+            );
+            assert.equal(
+              (
+                await settings({
+                  address: draft.address,
+                  deliveryPricingMode: "DISTANCE",
+                  deliveryBands: bands.slice(1),
+                })
+              ).status,
+              400,
+            );
+            const configured = await settings({
+              address: draft.address,
+              deliveryPricingMode: "DISTANCE",
+              deliveryBands: bands,
+            });
+            assert.equal(configured.status, 200);
+            assert.equal(configured.data.deliveryBands.length, 5);
+            assert.equal(configured.data.address.number, "10");
+            const savedStore = await db.store.findUniqueOrThrow({
+              where: { id: main.store.id },
+            });
+            assert.ok(savedStore.location);
+            assert.equal(
+              (
+                await api("orders/quote", "customer", "POST", {
+                  ...target("2000"),
+                  distanceMeters: 0,
+                })
+              ).status,
+              400,
+            );
+            assert.equal(
+              (await api("orders/quote", "customer", "POST", target("10001")))
+                .data.code,
+              "OUTSIDE_DELIVERY_AREA",
+            );
+            const exact = await ok(
+              "orders/quote",
+              "customer",
+              "POST",
+              target("2000"),
+            );
+            const above = await ok(
+              "orders/quote",
+              "customer",
+              "POST",
+              target("2001"),
+            );
+            assert.equal(exact.fee, 500);
+            assert.equal(above.fee, 700);
+            assert.equal(exact.delivery.distanceMeters, 2000);
+            assert.equal("configHash" in exact.delivery, false);
+            const counter = await ok("orders/quote", "attendant", "POST", {
+              ...target("6000"),
+              customer: { name: "Pedido balcão", phone: "11999999999" },
+              channel: "WHATSAPP",
+            });
+            assert.equal(counter.fee, 900);
+            const pickupCalls = calls;
+            const pickup = await ok("orders/quote", "customer", "POST", {
+              ...draft,
+              mode: "PICKUP",
+              address: null,
+            });
+            assert.equal(pickup.fee, 0);
+            assert.equal(pickup.delivery, null);
+            assert.equal(calls, pickupCalls);
+            const key = randomUUID(),
+              request = target("6000");
+            const quote = await ok(
+              "orders/quote",
+              "customer",
+              "POST",
+              request,
+              key,
+            );
+            const pricedCalls = calls;
+            unavailable = true;
+            assert.deepEqual(
+              await ok("orders/quote", "customer", "POST", request, key),
+              quote,
+            );
+            assert.equal(calls, pricedCalls);
+            assert.equal(
+              (await api("orders/quote", "customer", "POST", request)).status,
+              503,
+            );
+            let far = await ok("orders", "customer", "POST", {
+              quoteId: quote.quoteId,
+            });
+            assert.equal(far.fee, 900);
+            assert.equal(far.delivery.distanceMeters, 6000);
+            assert.equal(calls, pricedCalls + 1); // confirmation reuses the verified route
+            unavailable = false;
+            let near = await ok("orders", "customer", "POST", {
+              quoteId: exact.quoteId,
+            });
+            const changed = await settings({
+              address: { ...draft.address, number: "20" },
+            });
+            assert.equal(changed.status, 200);
+            assert.equal(
+              (
+                await api("orders", "customer", "POST", {
+                  quoteId: above.quoteId,
+                })
+              ).data.code,
+              "QUOTE_CHANGED",
+            );
+            assert.equal(
+              (await ok(`orders/${far.id}`, "customer")).delivery.origin.address
+                .number,
+              "10",
+            );
+            near = await assigned(near);
+            far = await assigned(far);
+            const route = await ok("driver/routes/start", "driver", "POST", {
+              confirmCollected: true,
+              deliveries: [far, near].map((o) => ({
+                id: o.id,
+                expectedVersion: o.version,
+              })),
+            });
+            assert.deepEqual(
+              route.items.map((o: any) => o.id),
+              [near.id, far.id],
+            );
+            for (const item of route.items)
+              await cmd(item, "complete", "driver", {
+                recipient: "Recebedor de teste",
+                paymentCollected: true,
+              });
+            const row = await db.auditTrail.findFirstOrThrow({
+              where: {
+                storeId: main.store.id,
+                tableName: "Order",
+                recordId: far.id,
+                operation: "INSERT",
+              },
+              orderBy: { id: "desc" },
+            });
+            assert.equal(
+              (row.after as any).deliverySnapshot.destination,
+              "[REDACTED]",
+            );
+            assert.equal(
+              (row.after as any).deliverySnapshot.origin.location,
+              "[REDACTED]",
+            );
+
+            // A delayed provider must not hold the store lock, and must not commit an
+            // old delivery configuration after the manager changes the rates.
+            let release!: () => void, entered!: () => void;
+            const waiting = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            const started = new Promise<void>((resolve) => {
+              entered = resolve;
+            });
+            maps.geocode = async () => {
+              entered();
+              await waiting;
+              return { latitude: -23.544, longitude: -46.63 };
+            };
+            const pendingQuote = api(
+              "orders/quote",
+              "customer",
+              "POST",
+              target("6000"),
+            );
+            await started;
+            try {
+              const saved = await Promise.race([
+                settings({
+                  deliveryBands: bands.map((band) => ({
+                    ...band,
+                    fee: band.fee + 100,
+                  })),
+                }),
+                new Promise<never>((_, reject) => {
+                  const timer = setTimeout(
+                    () => reject(new Error("Provider blocked the store lock")),
+                    5000,
+                  );
+                  timer.unref();
+                }),
+              ]);
+              assert.equal(saved.status, 200);
+            } finally {
+              release();
+            }
+            assert.equal((await pendingQuote).data.code, "DELIVERY_CHANGED");
+          } finally {
+            maps.geocode = geocode;
+            maps.route = directions;
+            assert.equal(
+              (
+                await settings({
+                  address: initial.address,
+                  deliveryPricingMode: "FLAT",
+                  deliveryFee: initial.deliveryFee,
+                })
+              ).status,
+              200,
+            );
+          }
         },
       );
 

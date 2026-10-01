@@ -19,18 +19,46 @@ export class Writes {
     private readonly auth: AuthService,
     private readonly bus: ChangeBus,
   ) {}
-  async run<T>(
+  async run<T, P = undefined>(
     actor: Actor,
     key: string,
     scope: string,
     body: unknown,
-    execute: (tx: Tx) => Promise<{ data: T; events?: Change[] }>,
+    execute: (tx: Tx, prepared: P) => Promise<{ data: T; events?: Change[] }>,
+    prepare?: () => Promise<P>,
   ): Promise<T> {
     keySchema.parse(key);
     auditIdentity(actor);
     const context = auditContext.getStore();
     if (context) context.action = scope;
     const fingerprint = digest({ scope, body });
+    // Network preparation runs without the store's advisory lock. Read replays first
+    // so an already committed command remains retryable during a provider outage.
+    let prepared: P | undefined;
+    if (prepare) {
+      const replay = await this.db.$transaction(async (tx) => {
+        await this.auth.assert(tx, actor);
+        const prior = await tx.idempotency.findUnique({
+          where: {
+            storeId_userId_key: {
+              storeId: actor.storeId,
+              userId: actor.id,
+              key,
+            },
+          },
+        });
+        if (prior)
+          ensure(
+            prior.fingerprint === fingerprint,
+            "IDEMPOTENCY_CONFLICT",
+            "Esta chave já foi usada com outro comando.",
+            409,
+          );
+        return prior;
+      });
+      if (replay) return replay.response as T;
+      prepared = await prepare();
+    }
     const result = await this.db.write(actor.storeId, async (tx) => {
       await this.auth.assert(tx, actor);
       const where = {
@@ -46,7 +74,7 @@ export class Writes {
         );
         return { data: prior.response as T, events: [] };
       }
-      const result = await execute(tx);
+      const result = await execute(tx, prepared as P);
       const response = json(result.data);
       await tx.idempotency.create({
         data: {

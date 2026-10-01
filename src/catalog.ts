@@ -4,8 +4,9 @@ import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { z } from "zod";
 import { Actor } from "./auth";
-import { Db, json, tokenHash } from "./db";
+import { Db, digest, json, tokenHash } from "./db";
 import {
+  addressSchema,
   Product,
   Promotion,
   comboComparison,
@@ -16,8 +17,10 @@ import {
   productSchema,
   promotionSchema,
   storeSchema,
+  deliveryBandsSchema,
   validateRecipe,
 } from "./domain";
+import { DeliveryMaps, deliverySettings } from "./delivery";
 import { Writes, audit, checkVersion } from "./writes";
 import { operation, operationDto } from "./schedule";
 import { SchedulingService } from "./scheduling";
@@ -69,6 +72,7 @@ export class CatalogService {
     private readonly db: Db,
     private readonly writes: Writes,
     private readonly scheduling: SchedulingService,
+    private readonly maps: DeliveryMaps,
   ) {}
   async catalog(slug: string, staff = false) {
     const target = await this.db.store.findUnique({ where: { slug } });
@@ -114,6 +118,7 @@ export class CatalogService {
             slug,
             name: store.name,
             ...operationDto(store),
+            ...deliverySettings(store),
             deliveryFee: store.deliveryFee,
             ...(staff ? { driverFee: store.driverFee } : {}),
             version: store.version,
@@ -312,103 +317,181 @@ export class CatalogService {
     );
   }
   saveStore(actor: Actor, key: string, input: z.infer<typeof storeSchema>) {
-    return this.writes.run(actor, key, "store:update", input, async (tx) => {
-      ensure(
-        actor.role === "MANAGER",
-        "FORBIDDEN",
-        "Somente o gerente pode alterar a operação.",
-        403,
-      );
-      const previous = await tx.store.findUniqueOrThrow({
-        where: { id: actor.storeId },
-      });
-      checkVersion(previous.version, input.expectedVersion);
-      const {
-        expectedVersion: _version,
-        open,
-        confirmEarlyOpen,
-        resumeSchedule,
-        ...data
-      } = input;
-      const candidate = { ...previous, ...data };
-      ensure(
-        candidate.opensAt !== candidate.closesAt,
-        "INVALID_HOURS",
-        "A abertura e o fechamento devem ter horários diferentes.",
-        400,
-      );
-      const changedHours =
-        candidate.opensAt !== previous.opensAt ||
-        candidate.closesAt !== previous.closesAt ||
-        candidate.scheduleEnabled !== previous.scheduleEnabled;
-      // Do not silently rewrite a time already promised to a customer.
-      if (changedHours) {
+    ensure(
+      actor.role === "MANAGER",
+      "FORBIDDEN",
+      "Somente o gerente pode alterar a operação.",
+      403,
+    );
+    return this.writes.run(
+      actor,
+      key,
+      "store:update",
+      input,
+      async (tx, location) => {
         ensure(
-          !(await tx.order.count({
-            where: { storeId: actor.storeId, status: "SCHEDULED" },
-          })),
-          "SCHEDULE_HAS_RESERVATIONS",
-          "Há pedidos agendados. Atenda ou cancele essas reservas antes de mudar o horário.",
-          409,
+          actor.role === "MANAGER",
+          "FORBIDDEN",
+          "Somente o gerente pode alterar a operação.",
+          403,
         );
-      }
-      if (changedHours || resumeSchedule) {
-        candidate.overrideOpen = null;
-        candidate.overrideUntil = null;
-      }
-      const now = new Date();
-      const state = operation(candidate, now);
-      if (open !== undefined && open !== state.open) {
-        ensure(
-          !open ||
-            !candidate.scheduleEnabled ||
-            state.scheduledOpen ||
-            confirmEarlyOpen,
-          "EARLY_OPEN_CONFIRMATION_REQUIRED",
-          "Confirme a abertura fora do horário. As reservas da próxima abertura serão liberadas.",
-          409,
-        );
-        if (candidate.scheduleEnabled) {
-          candidate.overrideOpen = open;
-          candidate.overrideUntil = state.nextBoundary;
-        } else {
-          candidate.open = open;
-        }
-      }
-      const saved = await tx.store.update({
-        where: { id: actor.storeId },
-        data: {
+        const previous = await tx.store.findUniqueOrThrow({
+          where: { id: actor.storeId },
+        });
+        checkVersion(previous.version, input.expectedVersion);
+        const {
+          expectedVersion: _version,
+          open,
+          confirmEarlyOpen,
+          resumeSchedule,
+          address,
+          deliveryBands,
+          ...data
+        } = input;
+        const candidate = {
+          ...previous,
           ...data,
-          open: operation(candidate, now).open,
-          overrideOpen: candidate.overrideOpen,
-          overrideUntil: candidate.overrideUntil,
-          version: { increment: 1 },
-        },
-      });
-      const result = await this.scheduling.sync(tx, saved, now);
-      await audit(tx, actor, "store.updated", {
-        ...data,
-        open,
-        confirmEarlyOpen,
-        resumeSchedule,
-        overrideUntil: result.store.overrideUntil,
-      });
-      return {
-        data: {
-          id: result.store.id,
-          slug: result.store.slug,
-          name: result.store.name,
-          ...operationDto(result.store, now),
-          deliveryFee: result.store.deliveryFee,
-          driverFee: result.store.driverFee,
-          version: result.store.version,
-        },
-        events: [
-          { type: "store.updated", storeId: actor.storeId },
-          ...result.events,
-        ],
-      };
-    });
+          ...(address !== undefined
+            ? { address: address ? json(address) : null }
+            : {}),
+          ...(deliveryBands !== undefined
+            ? { deliveryBands: json(deliveryBands) }
+            : {}),
+          ...(location !== undefined
+            ? { location: location ? json(location) : null }
+            : {}),
+        };
+        if (candidate.deliveryPricingMode === "DISTANCE") {
+          deliveryBandsSchema.parse(candidate.deliveryBands);
+          ensure(
+            candidate.address && candidate.location,
+            "DELIVERY_NOT_CONFIGURED",
+            "Informe o endereço completo da pizzaria antes de ativar as faixas.",
+            409,
+          );
+        }
+        ensure(
+          candidate.opensAt !== candidate.closesAt,
+          "INVALID_HOURS",
+          "A abertura e o fechamento devem ter horários diferentes.",
+          400,
+        );
+        const changedHours =
+          candidate.opensAt !== previous.opensAt ||
+          candidate.closesAt !== previous.closesAt ||
+          candidate.scheduleEnabled !== previous.scheduleEnabled;
+        // Do not silently rewrite a time already promised to a customer.
+        if (changedHours) {
+          ensure(
+            !(await tx.order.count({
+              where: { storeId: actor.storeId, status: "SCHEDULED" },
+            })),
+            "SCHEDULE_HAS_RESERVATIONS",
+            "Há pedidos agendados. Atenda ou cancele essas reservas antes de mudar o horário.",
+            409,
+          );
+        }
+        if (changedHours || resumeSchedule) {
+          candidate.overrideOpen = null;
+          candidate.overrideUntil = null;
+        }
+        const now = new Date();
+        const state = operation(candidate, now);
+        if (open !== undefined && open !== state.open) {
+          ensure(
+            !open ||
+              !candidate.scheduleEnabled ||
+              state.scheduledOpen ||
+              confirmEarlyOpen,
+            "EARLY_OPEN_CONFIRMATION_REQUIRED",
+            "Confirme a abertura fora do horário. As reservas da próxima abertura serão liberadas.",
+            409,
+          );
+          if (candidate.scheduleEnabled) {
+            candidate.overrideOpen = open;
+            candidate.overrideUntil = state.nextBoundary;
+          } else {
+            candidate.open = open;
+          }
+        }
+        const saved = await tx.store.update({
+          where: { id: actor.storeId },
+          data: {
+            ...data,
+            ...(address !== undefined
+              ? { address: address ? json(address) : Prisma.DbNull }
+              : {}),
+            ...(deliveryBands !== undefined
+              ? { deliveryBands: json(deliveryBands) }
+              : {}),
+            ...(location !== undefined
+              ? { location: location ? json(location) : Prisma.DbNull }
+              : {}),
+            open: operation(candidate, now).open,
+            overrideOpen: candidate.overrideOpen,
+            overrideUntil: candidate.overrideUntil,
+            version: { increment: 1 },
+          },
+        });
+        const result = await this.scheduling.sync(tx, saved, now);
+        await audit(tx, actor, "store.updated", {
+          ...data,
+          open,
+          confirmEarlyOpen,
+          resumeSchedule,
+          overrideUntil: result.store.overrideUntil,
+        });
+        return {
+          data: {
+            id: result.store.id,
+            slug: result.store.slug,
+            name: result.store.name,
+            ...operationDto(result.store, now),
+            ...deliverySettings(result.store),
+            deliveryFee: result.store.deliveryFee,
+            driverFee: result.store.driverFee,
+            version: result.store.version,
+          },
+          events: [
+            { type: "store.updated", storeId: actor.storeId },
+            ...result.events,
+          ],
+        };
+      },
+      async () => {
+        const previous = await this.db.store.findUniqueOrThrow({
+          where: { id: actor.storeId },
+        });
+        checkVersion(previous.version, input.expectedVersion);
+        const candidate = { ...previous, ...input };
+        if (candidate.deliveryPricingMode === "DISTANCE") {
+          deliveryBandsSchema.parse(candidate.deliveryBands);
+          ensure(
+            candidate.address,
+            "DELIVERY_NOT_CONFIGURED",
+            "Informe o endereço completo da pizzaria antes de ativar as faixas.",
+            409,
+          );
+        }
+        if (
+          input.address === undefined &&
+          candidate.deliveryPricingMode !== "DISTANCE"
+        )
+          return undefined;
+        const addressChanged =
+          input.address !== undefined &&
+          digest(input.address) !== digest(previous.address);
+        if (!addressChanged && previous.location) return undefined;
+        if (!candidate.address)
+          return input.address !== undefined ? null : undefined;
+        if (
+          candidate.deliveryPricingMode !== "DISTANCE" &&
+          !this.maps.configured
+        )
+          return addressChanged ? null : undefined;
+        return this.maps.geocode(addressSchema.parse(candidate.address));
+      },
+    );
   }
   async uploadImage(actor: Actor, key: string, buffer: Buffer) {
     let bytes: Buffer;

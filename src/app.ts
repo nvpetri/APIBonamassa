@@ -22,6 +22,7 @@ import { SchedulingService } from "./scheduling";
 import { Mailer } from "./mailer";
 import { InvitationsService } from "./invitations";
 import { AnalyticsService } from "./analytics";
+import { DeliveryMaps } from "./delivery";
 import { apiVersion } from "./version";
 
 @Module({
@@ -31,6 +32,7 @@ import { apiVersion } from "./version";
     AuthService,
     CatalogService,
     OrdersService,
+    DeliveryMaps,
     StaffService,
     Writes,
     ChangeBus,

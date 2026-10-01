@@ -59,6 +59,10 @@ model Store {
   closesAt      String @default("03:00") @db.VarChar(5)
   overrideOpen  Boolean?
   overrideUntil DateTime?
+  address       Json?
+  location      Json?
+  deliveryPricingMode String @default("FLAT") @db.VarChar(8)
+  deliveryBands Json @default("[]")
   deliveryFee   Int @default(700)
   driverFee     Int @default(800)
   version       Int @default(1)
@@ -193,6 +197,7 @@ model Order {
   mode String @db.VarChar(20)
   channel String @db.VarChar(20)
   customer Json
+  deliverySnapshot Json?
   address Json?
   note String @db.VarChar(240)
   items Json

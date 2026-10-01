@@ -141,6 +141,24 @@ export const addressSchema = z
         message: "Remova o complemento ou desmarque a opção sem complemento.",
       });
   });
+export const deliveryBandsSchema = z
+  .array(
+    z.strictObject({
+      upToMeters: z.number().int().min(100).max(100_000),
+      fee: z.number().int().min(0).max(10_000),
+    }),
+  )
+  .length(5)
+  .superRefine((bands, ctx) => {
+    bands.forEach((band, index) => {
+      if (index > 0 && band.upToMeters <= bands[index - 1].upToMeters)
+        ctx.addIssue({
+          code: "custom",
+          path: [index, "upToMeters"],
+          message: "Os cinco limites devem crescer, sem faixas sobrepostas.",
+        });
+    });
+  });
 export const phoneSchema = z
   .string()
   .regex(
@@ -461,6 +479,9 @@ export const storeSchema = actionSchema.extend({
   resumeSchedule: z.boolean().optional(),
   deliveryFee: cents.max(10000),
   driverFee: cents.max(10000),
+  address: addressSchema.nullable().optional(),
+  deliveryPricingMode: z.enum(["FLAT", "DISTANCE"]).optional(),
+  deliveryBands: deliveryBandsSchema.optional(),
 });
 export const emailSchema = z
   .email()
