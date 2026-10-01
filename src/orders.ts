@@ -3,7 +3,7 @@ import { Order, OrderEvent, Prisma, Role } from "@prisma/client";
 import { z } from "zod";
 import { Actor } from "./auth";
 import { decodeProduct, decodePromotion } from "./catalog";
-import { Db, Tx, digest, json } from "./db";
+import { Db, Tx, json } from "./db";
 import {
   Draft,
   Priced,
@@ -15,6 +15,7 @@ import {
   startRouteSchema,
 } from "./domain";
 import {
+  deliveryDigest,
   DeliveryMaps,
   DeliverySnapshot,
   deliverySnapshotSchema,
@@ -271,7 +272,7 @@ export class OrdersService {
             userId: actor.id,
             draft: json(draft),
             priced: json(priced),
-            fingerprint: digest(priced),
+            fingerprint: deliveryDigest(priced),
             expiresAt: new Date(Date.now() + 5 * 60_000),
           },
         });
@@ -365,7 +366,7 @@ export class OrdersService {
         );
       }
       ensure(
-        digest(priced) === quote.fingerprint,
+        deliveryDigest(priced) === quote.fingerprint,
         "QUOTE_CHANGED",
         "O valor, horário ou promoção mudou. Revise uma nova cotação.",
         409,

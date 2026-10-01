@@ -5,7 +5,7 @@ import { Prisma, PrismaClient, Role } from "@prisma/client";
 import { io, Socket } from "socket.io-client";
 import sharp from "sharp";
 import { createApp } from "../src/app";
-import { DeliveryMaps } from "../src/delivery";
+import { DeliveryMaps, deliveryDigest } from "../src/delivery";
 import { RuleError } from "../src/domain";
 import { Mailer } from "../src/mailer";
 import { AuthService, hashPassword } from "../src/auth";
@@ -1110,6 +1110,13 @@ test(
               "customer",
               "POST",
               target("2001"),
+            );
+            const storedQuote = await db.quote.findUniqueOrThrow({
+              where: { id: exact.quoteId },
+            });
+            assert.equal(
+              deliveryDigest(storedQuote.priced),
+              storedQuote.fingerprint,
             );
             assert.equal(exact.fee, 500);
             assert.equal(above.fee, 700);

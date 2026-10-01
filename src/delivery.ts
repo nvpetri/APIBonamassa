@@ -42,8 +42,21 @@ export const deliverySnapshotSchema = z.object({
 });
 export type DeliverySnapshot = z.infer<typeof deliverySnapshotSchema>;
 
+// Prisma/PostgreSQL JSON transport can change the final binary floating-point bit.
+// Cent amounts and distances remain exact integers; only coordinate hash inputs
+// use stable decimal text (about 0.1 m), without changing stored route values.
+export function deliveryDigest(value: unknown) {
+  const stable = JSON.parse(
+    JSON.stringify(value, (key, entry: unknown) =>
+      ["latitude", "longitude"].includes(key) && typeof entry === "number"
+        ? entry.toFixed(6)
+        : entry,
+    ),
+  );
+  return digest(stable);
+}
 export function deliveryHash(store: DeliveryStore) {
-  return digest({
+  return deliveryDigest({
     mode: store.deliveryPricingMode,
     address: store.address,
     location: store.location,

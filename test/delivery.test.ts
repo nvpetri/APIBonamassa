@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import {
+  deliveryDigest,
   DeliveryMaps,
   distanceFee,
   geocodePoint,
@@ -61,6 +62,29 @@ test("cinco faixas crescentes incluem seu limite exato e não cobram fora da ár
       location: { latitude: 1, longitude: 2 },
     }).success,
     false,
+  );
+});
+
+test("quote fingerprints tolerate coordinate JSON precision but keep money/distance exact", () => {
+  const priced = {
+    fee: 700,
+    distanceMeters: 2000,
+    destination: { latitude: -23.548000000000002, longitude: -46.63 },
+  };
+  assert.equal(
+    deliveryDigest(priced),
+    deliveryDigest({
+      ...priced,
+      destination: { ...priced.destination, latitude: -23.548 },
+    }),
+  );
+  assert.notEqual(
+    deliveryDigest(priced),
+    deliveryDigest({ ...priced, fee: 701 }),
+  );
+  assert.notEqual(
+    deliveryDigest(priced),
+    deliveryDigest({ ...priced, distanceMeters: 2001 }),
   );
 });
 

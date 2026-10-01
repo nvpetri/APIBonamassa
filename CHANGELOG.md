@@ -1,5 +1,9 @@
 # Histórico da API Bonamassa
 
+## [0.13.1] - 2026-10-01
+
+Estabiliza a comparação de coordenadas decimais nos fingerprints de cotações e configurações após o transporte JSON PostgreSQL/Prisma. Valores monetários e distâncias continuam inteiros e comparados exatamente; o snapshot preserva as coordenadas recebidas. Acrescenta regressão com persistência real da cotação. Sem migration adicional.
+
 ## [0.13.0] - 2026-10-01
 
 Endereço físico da pizzaria, cinco faixas de frete por distância de trajeto e snapshots de origem/destino no pedido. OpenRouteService é consultado apenas pela API, com cache limitado, timeout e geocodificação de endereço completo. As consultas externas ocorrem fora do lock transacional; gravações revalidam a configuração, e reenvios idempotentes funcionam durante indisponibilidade do provedor.
